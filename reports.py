@@ -1,10 +1,8 @@
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-import matplotlib.pyplot as plt
 import io
-import numpy as np
 from utils import format_brl, format_pct
 
 def generate_pdf_buffer(results):
@@ -18,16 +16,16 @@ def generate_pdf_buffer(results):
     elements = []
     
     elements.append(Paragraph(f"Relatório de Viabilidade Econômica", title_style))
-    elements.append(Paragraph(f"<b>Projeto:</b> {results['nome']}", normal))
-    elements.append(Paragraph(f"<b>Tipo:</b> {results['tipo']}", normal))
+    elements.append(Paragraph(f"Projeto: {results['nome']}", normal))
+    elements.append(Paragraph(f"Tipo: {results['tipo']}", normal))
     elements.append(Spacer(1, 20))
     
-    elements.append(Paragraph("1. VEREDITO FINAL", h2_style))
-    elements.append(Paragraph(f"<b>Resultado:</b> {results['veredito']} (Score: {results['score']}/100)", normal))
+    elements.append(Paragraph("1. Veredito Final", h2_style))
+    elements.append(Paragraph(f"Resultado: {results['veredito']} (Score: {results['score']}/100)", normal))
     for c in results['criterios']:
-        elements.append(Paragraph(f"{c[0]} {c[1]}", normal))
+        elements.append(Paragraph(f"{c[1]}", normal))
     
-    elements.append(Paragraph("2. INDICADORES FINANCEIROS", h2_style))
+    elements.append(Paragraph("2. Indicadores Financeiros", h2_style))
     base = results['base']
     
     data_ind = [
@@ -49,10 +47,11 @@ def generate_pdf_buffer(results):
     ]))
     elements.append(t_ind)
     
-    elements.append(Paragraph("3. AVALIAÇÃO DE RISCO", h2_style))
-    elements.append(Paragraph(f"<b>Classificação de Risco:</b> {results['risco_classificacao']}", normal))
+    elements.append(Paragraph("3. Avaliação de Risco e Sensibilidade", h2_style))
+    ang = f"{results['risco_angulo']:.1f}°" if results['risco_angulo'] else "N/A"
+    elements.append(Paragraph(f"Classificação de Risco: {results['risco_classificacao']} (Ângulo de sensibilidade: {ang})", normal))
     lim = format_pct(results['limite_viabilidade']) if results['limite_viabilidade'] else "N/A"
-    elements.append(Paragraph(f"<b>Queda limite suportada nas vendas:</b> {lim}", normal))
+    elements.append(Paragraph(f"Limite de queda suportado nas vendas: {lim}", normal))
     
     doc.build(elements)
     buffer.seek(0)
