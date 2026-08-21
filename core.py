@@ -1,5 +1,6 @@
 import numpy as np
 import numpy_financial as npf
+import math
 
 class FinancialEngine:
     @staticmethod
@@ -92,14 +93,29 @@ class ProjectAnalyzer:
     def analyze(self):
         base = self._analyze_scenario(1.0, False)
         
-        # 1. Sensibilidade
-        sensibilidade = []
-        fatores = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
-        for f in fatores:
-            res = self._analyze_scenario(f, False)
-            sensibilidade.append({"variacao": f - 1.0, "tir_m": res["tir_m"], "vpl": res["vpl"]})
+        # Cenário com queda de 20% nas vendas para cálculo do coeficiente angular da reta
+        cenario_20 = self._analyze_scenario(0.8, False)
+        
+        angulo = None
+        if base["tir_m"] is not None and cenario_20["tir_m"] is not None:
+            delta_x = -0.2  # Variação no eixo X (queda de 20%)
+            delta_y = cenario_20["tir_m"] - base["tir_m"]  # Variação no eixo Y (TIR)
+            
+            if delta_x != 0:
+                m = delta_y / delta_x  # Coeficiente angular (m = delta_y / delta_x)
+                angulo = math.degrees(math.atan(abs(m)))
 
-        # 2. Limite de Viabilidade (Queda máxima nas vendas até VPL = 0 ou TIR = TMA)
+        # Classificação de Risco baseada no ângulo da reta
+        if angulo is None:
+            risco = "INDEFINIDO"
+        elif angulo < 30:
+            risco = "BAIXO"
+        elif angulo < 60:
+            risco = "MÉDIO"
+        else:
+            risco = "ALTO"
+
+        # Limite de Viabilidade
         limite_viabilidade = None
         if base["vpl"] > 0:
             for factor in np.arange(1.0, -0.01, -0.01):
@@ -110,20 +126,7 @@ class ProjectAnalyzer:
         elif base["vpl"] < 0:
             limite_viabilidade = 0.0 
 
-        # 3. Classificação de Risco Baseada na Margem de Segurança Real
-        # Se o negócio suporta uma queda grande nas vendas, o risco é BAIXO.
-        if limite_viabilidade is not None:
-            queda_suportada_pct = abs(limite_viabilidade) * 100
-            if queda_suportada_pct >= 30:
-                risco = "BAIXO"
-            elif queda_suportada_pct >= 15:
-                risco = "MÉDIO"
-            else:
-                risco = "ALTO"
-        else:
-            risco = "MUITO ALTO" if base["vpl"] < 0 else "BAIXO"
-
-        # 4. Pró-Labore Analysis
+        # Pró-Labore Analysis
         pl_val = self.data.get("pro_labore", 0.0)
         pl_analise = None
         pl_recomendado = False
@@ -132,7 +135,7 @@ class ProjectAnalyzer:
             if pl_analise["vpl"] > 0 and (pl_analise["tir_m"] is not None and pl_analise["tir_m"] >= pl_analise["tma_m"]):
                 pl_recomendado = True
 
-        # 5. Score e Veredito
+        # Score e Veredito
         score = 0
         criterios = []
         
@@ -166,9 +169,13 @@ class ProjectAnalyzer:
         return {
             "nome": self.data.get("nome", "Projeto"),
             "tipo": self.data.get("tipo", "Futuro"),
-            "base": base, "sensibilidade": sensibilidade,
+            "base": base,
+            "risco_angulo": angulo,
             "risco_classificacao": risco,
             "limite_viabilidade": limite_viabilidade,
-            "pl_cenario": pl_analise, "pl_recomendado": pl_recomendado,
-            "score": score, "veredito": veredito, "criterios": criterios
+            "pl_cenario": pl_analise,
+            "pl_recomendado": pl_recomendado,
+            "score": score,
+            "veredito": veredito,
+            "criterios": criterios
         }
