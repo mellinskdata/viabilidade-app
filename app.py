@@ -118,7 +118,9 @@ if calcular:
 
             c4, c5 = st.columns(2)
             limite = format_pct(res['limite_viabilidade']) if res['limite_viabilidade'] else "Inviável"
-            angulo_txt = f"{res['risco_angulo']:.1f}°" if res['risco_angulo'] else "N/A"
+            
+            angulo_val = res.get('risco_angulo', 0.0)
+            angulo_txt = f"{angulo_val:.1f}°" if angulo_val is not None else "0.0°"
             
             c4.write(f"**Risco ({res['risco_classificacao']})**: Ângulo de sensibilidade de {angulo_txt}. Queda limite nas vendas: {limite}.")
             
