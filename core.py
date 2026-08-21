@@ -93,27 +93,16 @@ class ProjectAnalyzer:
     def analyze(self):
         base = self._analyze_scenario(1.0, False)
         
-        # Cenário com queda de 20% nas vendas para cálculo do coeficiente angular da reta
+        # Cenário com queda de 20% nas vendas para cálculo do coeficiente angular
         cenario_20 = self._analyze_scenario(0.8, False)
         
-        angulo = None
+        angulo = 0.0
         if base["tir_m"] is not None and cenario_20["tir_m"] is not None:
-            delta_x = -0.2  # Variação no eixo X (queda de 20%)
-            delta_y = cenario_20["tir_m"] - base["tir_m"]  # Variação no eixo Y (TIR)
-            
+            delta_x = -0.2  
+            delta_y = cenario_20["tir_m"] - base["tir_m"]  
             if delta_x != 0:
-                m = delta_y / delta_x  # Coeficiente angular (m = delta_y / delta_x)
+                m = delta_y / delta_x  
                 angulo = math.degrees(math.atan(abs(m)))
-
-        # Classificação de Risco baseada no ângulo da reta
-        if angulo is None:
-            risco = "INDEFINIDO"
-        elif angulo < 30:
-            risco = "BAIXO"
-        elif angulo < 60:
-            risco = "MÉDIO"
-        else:
-            risco = "ALTO"
 
         # Limite de Viabilidade
         limite_viabilidade = None
@@ -125,6 +114,14 @@ class ProjectAnalyzer:
                     break
         elif base["vpl"] < 0:
             limite_viabilidade = 0.0 
+
+        # Classificação de Risco segura
+        if limite_viabilidade is not None and abs(limite_viabilidade) >= 0.3:
+            risco = "BAIXO"
+        elif limite_viabilidade is not None and abs(limite_viabilidade) >= 0.15:
+            risco = "MÉDIO"
+        else:
+            risco = "ALTO"
 
         # Pró-Labore Analysis
         pl_val = self.data.get("pro_labore", 0.0)
@@ -141,21 +138,21 @@ class ProjectAnalyzer:
         
         if base["vpl"] > 0:
             score += 40
-            criterios.append(("[✓]", "VPL positivo (Gera Lucro)"))
+            criterios.append(("VPL positivo (Gera Lucro)"))
         else:
-            criterios.append(("[X]", "VPL negativo"))
+            criterios.append(("VPL negativo"))
             
         if base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]:
             score += 40
-            criterios.append(("[✓]", "Rentabilidade superior à TMA"))
+            criterios.append(("Rentabilidade superior à TMA"))
         else:
-            criterios.append(("[X]", "Rentabilidade abaixo da TMA"))
+            criterios.append(("Rentabilidade abaixo da TMA"))
             
         if base["payback"] is not None:
             score += 20
-            criterios.append(("[✓]", "Investimento recuperado no prazo"))
+            criterios.append(("Investimento recuperado no prazo"))
         else:
-            criterios.append(("[X]", "Investimento não recuperado"))
+            criterios.append(("Investimento não recuperado"))
             
         score = max(0, min(100, score))
         
