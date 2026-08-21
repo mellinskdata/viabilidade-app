@@ -35,7 +35,6 @@ def generate_pdf_buffer(results):
         ["VPL (Valor Presente Líquido)", format_brl(base['vpl'])],
         ["TIR Mensal", format_pct(base['tir_m'])],
         ["TIR Anual", format_pct(base['tir_a'])],
-        ["TIRM Mensal", format_pct(base['tirm_m'])],
         ["Payback Descontado", f"{base['payback']:.1f} meses" if base['payback'] else "Não recupera"]
     ]
     t_ind = Table(data_ind, colWidths=[200, 200])
@@ -50,32 +49,10 @@ def generate_pdf_buffer(results):
     ]))
     elements.append(t_ind)
     
-    elements.append(Paragraph("3. ANÁLISE DE RISCO", h2_style))
-    elements.append(Paragraph(f"<b>Risco:</b> {results['risco_classificacao']} (Ângulo: {results['risco_angulo']:.1f}°)" if results['risco_angulo'] else "<b>Risco:</b> Indefinido", normal))
+    elements.append(Paragraph("3. AVALIAÇÃO DE RISCO", h2_style))
+    elements.append(Paragraph(f"<b>Classificação de Risco:</b> {results['risco_classificacao']}", normal))
     lim = format_pct(results['limite_viabilidade']) if results['limite_viabilidade'] else "N/A"
-    elements.append(Paragraph(f"<b>O negócio quebra se as vendas caírem:</b> {lim}", normal))
-    
-    # Gerar Gráfico em Memória
-    plt.figure(figsize=(5, 3))
-    x_vals = [(s['variacao'] * 100) for s in results['sensibilidade']]
-    y_vals = [(s['tir_m'] * 100 if s['tir_m'] else 0) for s in results['sensibilidade']]
-    plt.plot(x_vals, y_vals, marker='o', label="TIR Projetada")
-    tma_p = base['tma_m'] * 100
-    plt.axhline(y=tma_p, color='r', linestyle='--', label=f"TMA ({tma_p:.2f}%)")
-    plt.fill_between(x_vals, y_vals, tma_p, where=(np.array(y_vals) > tma_p), interpolate=True, color='green', alpha=0.1)
-    plt.fill_between(x_vals, y_vals, tma_p, where=(np.array(y_vals) <= tma_p), interpolate=True, color='red', alpha=0.1)
-    plt.title("Sensibilidade da TIR")
-    plt.xlabel("Variação nas Vendas (%)")
-    plt.ylabel("TIR ao mês (%)")
-    plt.grid(True)
-    
-    img_data = io.BytesIO()
-    plt.savefig(img_data, format='png', bbox_inches='tight')
-    img_data.seek(0)
-    plt.close()
-    
-    elements.append(Spacer(1, 10))
-    elements.append(Image(img_data, width=350, height=210))
+    elements.append(Paragraph(f"<b>Queda limite suportada nas vendas:</b> {lim}", normal))
     
     doc.build(elements)
     buffer.seek(0)
