@@ -1,6 +1,5 @@
 import numpy as np
 import numpy_financial as npf
-import math
 
 class FinancialEngine:
     @staticmethod
@@ -95,28 +94,12 @@ class ProjectAnalyzer:
         
         # 1. Sensibilidade
         sensibilidade = []
-        fatores = [1.3, 1.2, 1.1, 1.0, 0.9, 0.8, 0.7, 0.6]
+        fatores = [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
         for f in fatores:
             res = self._analyze_scenario(f, False)
             sensibilidade.append({"variacao": f - 1.0, "tir_m": res["tir_m"], "vpl": res["vpl"]})
-            
-        # 2. Risco Angular
-        cenario_20 = self._analyze_scenario(0.8, False)
-        if base["tir_m"] is not None and cenario_20["tir_m"] is not None:
-            delta_tir = (base["tir_m"] * 100) - (cenario_20["tir_m"] * 100)
-            delta_vendas = 20.0
-            m = abs(delta_tir / delta_vendas)
-            angulo = math.degrees(math.atan(m))
-        else:
-            angulo = None
 
-        if angulo is None: risco = "INDEFINIDO"
-        elif angulo < 30: risco = "BAIXO"
-        elif angulo < 45: risco = "MÉDIO"
-        elif angulo < 60: risco = "ALTO"
-        else: risco = "MUITO ALTO"
-
-        # 3. Limite de Viabilidade
+        # 2. Limite de Viabilidade (Queda máxima nas vendas até VPL = 0 ou TIR = TMA)
         limite_viabilidade = None
         if base["vpl"] > 0:
             for factor in np.arange(1.0, -0.01, -0.01):
@@ -126,6 +109,19 @@ class ProjectAnalyzer:
                     break
         elif base["vpl"] < 0:
             limite_viabilidade = 0.0 
+
+        # 3. Classificação de Risco Baseada na Margem de Segurança Real
+        # Se o negócio suporta uma queda grande nas vendas, o risco é BAIXO.
+        if limite_viabilidade is not None:
+            queda_suportada_pct = abs(limite_viabilidade) * 100
+            if queda_suportada_pct >= 30:
+                risco = "BAIXO"
+            elif queda_suportada_pct >= 15:
+                risco = "MÉDIO"
+            else:
+                risco = "ALTO"
+        else:
+            risco = "MUITO ALTO" if base["vpl"] < 0 else "BAIXO"
 
         # 4. Pró-Labore Analysis
         pl_val = self.data.get("pro_labore", 0.0)
@@ -141,36 +137,37 @@ class ProjectAnalyzer:
         criterios = []
         
         if base["vpl"] > 0:
-            score += 30
-            criterios.append(("[✓]", "VPL positivo"))
+            score += 40
+            criterios.append(("[✓]", "VPL positivo (Gera Lucro)"))
         else:
             criterios.append(("[X]", "VPL negativo"))
             
         if base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]:
-            score += 30
-            criterios.append(("[✓]", "TIR superior/igual à TMA"))
+            score += 40
+            criterios.append(("[✓]", "Rentabilidade superior à TMA"))
         else:
-            criterios.append(("[X]", "TIR inferior à TMA ou inexistente"))
+            criterios.append(("[X]", "Rentabilidade abaixo da TMA"))
             
         if base["payback"] is not None:
             score += 20
-            criterios.append(("[✓]", "Payback dentro do período"))
+            criterios.append(("[✓]", "Investimento recuperado no prazo"))
         else:
-            criterios.append(("[X]", "Investimento não recuperado no período"))
+            criterios.append(("[X]", "Investimento não recuperado"))
             
-        risco_pontos = {"BAIXO": 20, "MÉDIO": 10, "ALTO": 0, "MUITO ALTO": -10, "INDEFINIDO": 0}
-        score += risco_pontos.get(risco, 0)
         score = max(0, min(100, score))
         
-        if score >= 80: veredito = "APROVADO"
-        elif score < 50: veredito = "REPROVADO"
-        else: veredito = "REVISÃO RECOMENDADA"
+        if score >= 80 and risco in ["BAIXO", "MÉDIO"]:
+            veredito = "APROVADO"
+        elif score < 50:
+            veredito = "REPROVADO"
+        else:
+            veredito = "REVISÃO RECOMENDADA"
 
         return {
             "nome": self.data.get("nome", "Projeto"),
             "tipo": self.data.get("tipo", "Futuro"),
             "base": base, "sensibilidade": sensibilidade,
-            "risco_angulo": angulo, "risco_classificacao": risco,
+            "risco_classificacao": risco,
             "limite_viabilidade": limite_viabilidade,
             "pl_cenario": pl_analise, "pl_recomendado": pl_recomendado,
             "score": score, "veredito": veredito, "criterios": criterios
