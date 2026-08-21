@@ -22,16 +22,6 @@ class FinancialEngine:
             return None
 
     @staticmethod
-    def calc_mirr(cash_flows: list, finance_rate: float, reinvest_rate: float):
-        try:
-            mirr = npf.mirr(cash_flows, finance_rate, reinvest_rate)
-            if mirr is None or np.isnan(mirr):
-                return None
-            return float(mirr)
-        except:
-            return None
-
-    @staticmethod
     def calc_discounted_payback(rate: float, cash_flows: list):
         accumulated = 0.0
         for t, cf in enumerate(cash_flows):
@@ -59,16 +49,14 @@ class ProjectAnalyzer:
         
         if mode == "average":
             meses = int(self.data.get("periodo_meses", 12))
-            rec = self.data.get("receita_media", 0.0) * variation_factor
-            cus = self.data.get("custo_medio", 0.0)
-            fluxo_mensal = rec - cus - pro_labore
+            fluxo_liq = self.data.get("fluxo_liquido_medio", 0.0) * variation_factor
+            fluxo_mensal = fluxo_liq - pro_labore
             cfs.extend([fluxo_mensal] * meses)
         else:
             mensais = self.data.get("dados_mensais", [])
             for m in mensais:
-                rec = m.get("receita", 0.0) * variation_factor
-                cus = m.get("custo", 0.0)
-                cfs.append(rec - cus - pro_labore)
+                liq = m.get("fluxo_liquido", 0.0) * variation_factor
+                cfs.append(liq - pro_labore)
                 
         return cfs
 
@@ -80,20 +68,17 @@ class ProjectAnalyzer:
         vpl = FinancialEngine.calc_npv(tma_m, cfs)
         tir_m = FinancialEngine.calc_irr(cfs)
         tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None
-        tirm_m = FinancialEngine.calc_mirr(cfs, tma_m, tma_m)
-        tirm_a = ((1 + tirm_m)**12 - 1) if tirm_m is not None else None
         payback = FinancialEngine.calc_discounted_payback(tma_m, cfs)
         
         return {
             "cfs": cfs, "tma_m": tma_m, "tma_a": tma_a,
             "vpl": vpl, "tir_m": tir_m, "tir_a": tir_a,
-            "tirm_m": tirm_m, "tirm_a": tirm_a, "payback": payback
+            "payback": payback
         }
 
     def analyze(self):
         base = self._analyze_scenario(1.0, False)
         
-        # Cenário com queda de 20% nas vendas para cálculo do coeficiente angular
         cenario_20 = self._analyze_scenario(0.8, False)
         
         angulo = 0.0
@@ -104,7 +89,6 @@ class ProjectAnalyzer:
                 m = delta_y / delta_x  
                 angulo = math.degrees(math.atan(abs(m)))
 
-        # Limite de Viabilidade
         limite_viabilidade = None
         if base["vpl"] > 0:
             for factor in np.arange(1.0, -0.01, -0.01):
@@ -115,7 +99,6 @@ class ProjectAnalyzer:
         elif base["vpl"] < 0:
             limite_viabilidade = 0.0 
 
-        # Classificação de Risco segura
         if limite_viabilidade is not None and abs(limite_viabilidade) >= 0.3:
             risco = "BAIXO"
         elif limite_viabilidade is not None and abs(limite_viabilidade) >= 0.15:
@@ -123,7 +106,6 @@ class ProjectAnalyzer:
         else:
             risco = "ALTO"
 
-        # Pró-Labore Analysis
         pl_val = self.data.get("pro_labore", 0.0)
         pl_analise = None
         pl_recomendado = False
@@ -132,27 +114,26 @@ class ProjectAnalyzer:
             if pl_analise["vpl"] > 0 and (pl_analise["tir_m"] is not None and pl_analise["tir_m"] >= pl_analise["tma_m"]):
                 pl_recomendado = True
 
-        # Score e Veredito
         score = 0
         criterios = []
         
         if base["vpl"] > 0:
             score += 40
-            criterios.append(("VPL positivo (Gera Lucro)"))
+            criterios.append("VPL positivo (Gera Lucro)")
         else:
-            criterios.append(("VPL negativo"))
+            criterios.append("VPL negativo")
             
         if base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]:
             score += 40
-            criterios.append(("Rentabilidade superior à TMA"))
+            criterios.append("Rentabilidade superior à TMA")
         else:
-            criterios.append(("Rentabilidade abaixo da TMA"))
+            criterios.append("Rentabilidade abaixo da TMA")
             
         if base["payback"] is not None:
             score += 20
-            criterios.append(("Investimento recuperado no prazo"))
+            criterios.append("Investimento recuperado no prazo")
         else:
-            criterios.append(("Investimento não recuperado"))
+            criterios.append("Investimento não recuperado")
             
         score = max(0, min(100, score))
         
