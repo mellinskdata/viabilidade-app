@@ -40,28 +40,31 @@ class ProjectAnalyzer:
     def __init__(self, data: dict):
         self.data = data
         
-    def generate_cash_flows(self, variation_factor=1.0, apply_pro_labore=False):
+    def generate_cash_flows(self, variation_factor=1.0):
         mode = self.data.get("mode", "average")
         inv = self.data.get("investimento", 0.0)
-        pro_labore = self.data.get("pro_labore", 0.0) if apply_pro_labore else 0.0
+        pro_labore = self.data.get("pro_labore", 0.0)
         
         cfs = [-inv]
         
         if mode == "average":
             meses = int(self.data.get("periodo_meses", 12))
-            fluxo_liq = self.data.get("fluxo_liquido_medio", 0.0) * variation_factor
-            fluxo_mensal = fluxo_liq - pro_labore
+            rec = self.data.get("receita_media", 0.0) * variation_factor
+            cus = self.data.get("custo_medio", 0.0)
+            # Fluxo líquido mensal deduzindo o pró-labore
+            fluxo_mensal = rec - cus - pro_labore
             cfs.extend([fluxo_mensal] * meses)
         else:
             mensais = self.data.get("dados_mensais", [])
             for m in mensais:
-                liq = m.get("fluxo_liquido", 0.0) * variation_factor
-                cfs.append(liq - pro_labore)
+                rec = m.get("receita", 0.0) * variation_factor
+                cus = m.get("custo", 0.0)
+                cfs.append(rec - cus - pro_labore)
                 
         return cfs
 
-    def _analyze_scenario(self, variation_factor=1.0, apply_pro_labore=False):
-        cfs = self.generate_cash_flows(variation_factor, apply_pro_labore)
+    def _analyze_scenario(self, variation_factor=1.0):
+        cfs = self.generate_cash_flows(variation_factor)
         tma_a = self.data.get("tma_anual", 0.0)
         tma_m = FinancialEngine.calc_tma_mensal(tma_a)
         
@@ -77,9 +80,9 @@ class ProjectAnalyzer:
         }
 
     def analyze(self):
-        base = self._analyze_scenario(1.0, False)
+        base = self._analyze_scenario(1.0)
         
-        cenario_20 = self._analyze_scenario(0.8, False)
+        cenario_20 = self._analyze_scenario(0.8)
         
         angulo = 0.0
         if base["tir_m"] is not None and cenario_20["tir_m"] is not None:
@@ -92,7 +95,7 @@ class ProjectAnalyzer:
         limite_viabilidade = None
         if base["vpl"] > 0:
             for factor in np.arange(1.0, -0.01, -0.01):
-                res_limite = self._analyze_scenario(factor, False)
+                res_limite = self._analyze_scenario(factor)
                 if res_limite["vpl"] < 0:
                     limite_viabilidade = factor - 1.0
                     break
@@ -105,14 +108,6 @@ class ProjectAnalyzer:
             risco = "MÉDIO"
         else:
             risco = "ALTO"
-
-        pl_val = self.data.get("pro_labore", 0.0)
-        pl_analise = None
-        pl_recomendado = False
-        if pl_val > 0:
-            pl_analise = self._analyze_scenario(1.0, True)
-            if pl_analise["vpl"] > 0 and (pl_analise["tir_m"] is not None and pl_analise["tir_m"] >= pl_analise["tma_m"]):
-                pl_recomendado = True
 
         score = 0
         criterios = []
@@ -151,8 +146,6 @@ class ProjectAnalyzer:
             "risco_angulo": angulo,
             "risco_classificacao": risco,
             "limite_viabilidade": limite_viabilidade,
-            "pl_cenario": pl_analise,
-            "pl_recomendado": pl_recomendado,
             "score": score,
             "veredito": veredito,
             "criterios": criterios
