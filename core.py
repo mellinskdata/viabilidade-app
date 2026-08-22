@@ -51,7 +51,6 @@ class ProjectAnalyzer:
             meses = int(self.data.get("periodo_meses", 12))
             rec = self.data.get("receita_media", 0.0) * variation_factor
             cus = self.data.get("custo_medio", 0.0)
-            # Lógica central: Fluxo Líquido = Receita - Custos - Pró-Labore
             fluxo_mensal = rec - cus - pro_labore
             cfs.extend([fluxo_mensal] * meses)
         else:
@@ -82,29 +81,38 @@ class ProjectAnalyzer:
     def analyze(self):
         base = self._analyze_scenario(1.0)
         
+        # Cenário com queda de 20% nas receitas (fator 0.8) para o coeficiente angular da reta
         cenario_20 = self._analyze_scenario(0.8)
         
         angulo = 0.0
         if base["tir_m"] is not None and cenario_20["tir_m"] is not None:
-            delta_x = -0.2  
-            delta_y = cenario_20["tir_m"] - base["tir_m"]  
+            delta_x = -0.2  # Variação no eixo X (-20%)
+            delta_y = cenario_20["tir_m"] - base["tir_m"]  # Variação no eixo Y (TIR)
             if delta_x != 0:
-                m = delta_y / delta_x  
+                m = delta_y / delta_x  # Coeficiente angular m = delta_y / delta_x
                 angulo = math.degrees(math.atan(abs(m)))
 
-        limite_viabilidade = None
+        # Limite de Viabilidade (Queda máxima suportada até VPL = 0)
+        limite_viabilidade = 0.0
         if base["vpl"] > 0:
-            for factor in np.arange(1.0, -0.01, -0.01):
-                res_limite = self._analyze_scenario(factor)
-                if res_limite["vpl"] < 0:
-                    limite_viabilidade = factor - 1.0
+            # Varredura percentual de 0% até -100% (fator de 1.0 até 0.0)
+            melhor_fator = 1.0
+            for f in np.linspace(1.0, 0.0, 1000):
+                res_f = self._analyze_scenario(f)
+                if res_f["vpl"] >= 0:
+                    melhor_fator = f
+                else:
                     break
-        elif base["vpl"] < 0:
+            # O limite é o quanto a receita pode cair (ex: se o VPL zera com fator 0.52, a queda limite é -48%)
+            limite_viabilidade = melhor_fator - 1.0
+        else:
             limite_viabilidade = 0.0 
 
-        if limite_viabilidade is not None and abs(limite_viabilidade) >= 0.3:
+        # Classificação de Risco baseada na margem de queda suportada
+        queda_abs = abs(limite_viabilidade)
+        if queda_abs >= 0.30:
             risco = "BAIXO"
-        elif limite_viabilidade is not None and abs(limite_viabilidade) >= 0.15:
+        elif queda_abs >= 0.15:
             risco = "MÉDIO"
         else:
             risco = "ALTO"
