@@ -17,13 +17,18 @@ st.markdown("""
 if "ex_nome" not in st.session_state:
     st.session_state.update({
         "ex_nome": "", "ex_tma": "", "ex_pro": "", "ex_inv": "", 
-        "ex_fluxo": "", "ex_meses": "36"
+        "ex_rec": "", "ex_cus": "", "ex_meses": "12"
     })
 
 def carregar_exemplo():
     st.session_state.update({
-        "ex_nome": "Exercicio Professor (Cafeteria)", "ex_tma": "12,00", "ex_pro": "0,00", 
-        "ex_inv": "80000,00", "ex_fluxo": "5000,00", "ex_meses": "36"
+        "ex_nome": "Trailer de Sukiyaki", 
+        "ex_tma": "15,00", 
+        "ex_pro": "2000,00", 
+        "ex_inv": "29400,00", 
+        "ex_rec": "10000,00", 
+        "ex_cus": "4000,00", 
+        "ex_meses": "12"
     })
 
 with st.sidebar:
@@ -47,27 +52,30 @@ col3, col4 = st.columns(2)
 tma = col3.text_input("Taxa Mínima Aceitável ao ano (%)", value=st.session_state.ex_tma)
 pro_labore = col4.text_input("Pró-Labore mensal desejado (R$)", value=st.session_state.ex_pro)
 
-st.header("2. Fluxo de Caixa")
-modo = st.radio("Forma de preenchimento", ["Usar Média Mensal (Fluxo Líquido)", "Preencher Mês a Mês"])
+st.header("2. Receitas e Custos")
+modo = st.radio("Forma de preenchimento", ["Usar Média Mensal", "Preencher Mês a Mês"])
 inv = st.text_input("Investimento Inicial (R$)", value=st.session_state.ex_inv)
 
 dados_mensais = []
 periodo_meses = 0
-fluxo_liquido_medio = 0
+rec_media = 0
+cus_medio = 0
 
 if "Média" in modo:
-    col5, col6 = st.columns(2)
-    fluxo_txt = col5.text_input("Fluxo de Caixa Líquido Mensal (R$)", value=st.session_state.ex_fluxo)
-    meses_txt = col6.text_input("Período (meses)", value=st.session_state.ex_meses)
+    col5, col6, col7 = st.columns(3)
+    rec_media_txt = col5.text_input("Receita Média mensal (R$)", value=st.session_state.ex_rec)
+    cus_medio_txt = col6.text_input("Custo Médio mensal (R$)", value=st.session_state.ex_cus)
+    meses_txt = col7.text_input("Período (meses)", value=st.session_state.ex_meses)
     
-    fluxo_liquido_medio = parse_brl(fluxo_txt)
+    rec_media = parse_brl(rec_media_txt)
+    cus_medio = parse_brl(cus_medio_txt)
     try: periodo_meses = int(meses_txt)
     except: periodo_meses = 0
 else:
-    df_padrao = pd.DataFrame([{"Mês": i+1, "Fluxo Líquido (R$)": 0.0} for i in range(12)])
+    df_padrao = pd.DataFrame([{"Mês": i+1, "Receita (R$)": 0.0, "Custo (R$)": 0.0} for i in range(12)])
     df_editado = st.data_editor(df_padrao, num_rows="dynamic", use_container_width=True)
     for index, row in df_editado.iterrows():
-        dados_mensais.append({"fluxo_liquido": float(row["Fluxo Líquido (R$)"])})
+        dados_mensais.append({"receita": float(row["Receita (R$)"]), "custo": float(row["Custo (R$)"])})
     periodo_meses = len(dados_mensais)
 
 st.markdown("---")
@@ -85,7 +93,7 @@ if calcular:
             "nome": nome, "tipo": tipo, "tma_anual": parse_brl(tma) / 100.0,
             "pro_labore": parse_brl(pro_labore), "investimento": investimento_float,
             "mode": "average" if "Média" in modo else "monthly",
-            "fluxo_liquido_medio": fluxo_liquido_medio,
+            "receita_media": rec_media, "custo_medio": cus_medio,
             "periodo_meses": periodo_meses, "dados_mensais": dados_mensais
         }
         
@@ -119,14 +127,7 @@ if calcular:
             angulo_txt = f"{angulo_val:.1f}°" if angulo_val is not None else "0.0°"
             
             c4.write(f"**Risco ({res['risco_classificacao']})**: Ângulo de sensibilidade de {angulo_txt}. Queda limite nas vendas: {limite}.")
-            
-            if res['pl_cenario']:
-                if res['pl_recomendado']:
-                    c5.write("**Pró-Labore:** Compatível com a saúde financeira do negócio.")
-                else:
-                    c5.write("**Pró-Labore:** Incompatível (compromete a viabilidade).")
-            else:
-                c5.write("**Pró-Labore:** Não calculado.")
+            c5.write(f"**Fluxo Líquido Operacional:** R$ {((rec_media if 'Média' in modo else 0) - (cus_medio if 'Média' in modo else 0) - parse_brl(pro_labore)):,.2f} / mês (já descontado o pró-labore).")
 
             st.markdown("---")
             pdf_buffer = generate_pdf_buffer(res)
