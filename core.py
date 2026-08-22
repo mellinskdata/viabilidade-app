@@ -51,7 +51,7 @@ class ProjectAnalyzer:
             meses = int(self.data.get("periodo_meses", 12))
             rec = self.data.get("receita_media", 0.0) * variation_factor
             cus = self.data.get("custo_medio", 0.0)
-            # Fluxo líquido mensal deduzindo o pró-labore
+            # Lógica central: Fluxo Líquido = Receita - Custos - Pró-Labore
             fluxo_mensal = rec - cus - pro_labore
             cfs.extend([fluxo_mensal] * meses)
         else:
