@@ -80,33 +80,40 @@ class ProjectAnalyzer:
 
     def analyze(self):
         base = self._analyze_scenario(1.0)
+        tma_m = base["tma_m"]
         
-        # Cenário com queda de 20% (fator 0.8) para calcular a inclinação da reta da TIR
-        cenario_20 = self._analyze_scenario(0.8)
-        
-        angulo = 0.0
-        if base["tir_m"] is not None and cenario_20["tir_m"] is not None:
-            delta_x = -0.2  # Variação no eixo X (-20%)
-            delta_y = cenario_20["tir_m"] - base["tir_m"]  # Variação no eixo Y (TIR)
-            if delta_x != 0:
-                m = delta_y / delta_x  # Coeficiente angular m = delta_y / delta_x
-                angulo = math.degrees(math.atan(abs(m)))
-
-        # Limite de Viabilidade (Queda máxima suportada até VPL = 0)
-        limite_viabilidade = 0.0
+        # 1. Encontrar o ponto exato de interseção (onde o VPL zera / cruza a TMA)
+        fator_equilibrio = 1.0
         if base["vpl"] > 0:
-            melhor_fator = 1.0
-            for f in np.linspace(1.0, 0.0, 1000):
+            for f in np.linspace(1.0, 0.0, 2000):
                 res_f = self._analyze_scenario(f)
                 if res_f["vpl"] >= 0:
-                    melhor_fator = f
+                    fator_equilibrio = f
                 else:
                     break
-            limite_viabilidade = melhor_fator - 1.0
         else:
-            limite_viabilidade = 0.0 
+            fator_equilibrio = 1.0
 
-        # Classificação de Risco estritamente baseada nos ângulos (30°, 45°, 60°)
+        # Delta X no método do professor: a distância percentual do 100% até o ponto de equilíbrio (ex: 100% - 85% = 15%)
+        delta_x_pct = (1.0 - fator_equilibrio) * 100.0  
+        if delta_x_pct <= 0:
+            delta_x_pct = 1.0 # Evita divisão por zero se inviável
+
+        # Delta Y no método do professor: TIR Base (%) - TMA (%)
+        angulo = 0.0
+        if base["tir_m"] is not None:
+            tir_base_pct = base["tir_m"] * 100.0
+            tma_pct = tma_m * 100.0
+            delta_y = tir_base_pct - tma_pct  # Cateto oposto
+            
+            if delta_y > 0:
+                # Tangente do ângulo α = Delta Y / Delta X (em %)
+                tan_alpha = delta_y / delta_x_pct
+                angulo = math.degrees(math.atan(tan_alpha))
+
+        limite_viabilidade = fator_equilibrio - 1.0
+
+        # Classificação de Risco estritamente pelos patamares de ângulo do professor (30°, 45°, 60°)
         if angulo < 30:
             risco = "BAIXO"
         elif angulo < 45:
