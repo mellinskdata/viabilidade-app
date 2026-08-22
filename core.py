@@ -81,7 +81,7 @@ class ProjectAnalyzer:
     def analyze(self):
         base = self._analyze_scenario(1.0)
         
-        # Cenário com queda de 20% nas receitas (fator 0.8) para o coeficiente angular da reta
+        # Cenário com queda de 20% (fator 0.8) para calcular a inclinação da reta da TIR
         cenario_20 = self._analyze_scenario(0.8)
         
         angulo = 0.0
@@ -95,7 +95,6 @@ class ProjectAnalyzer:
         # Limite de Viabilidade (Queda máxima suportada até VPL = 0)
         limite_viabilidade = 0.0
         if base["vpl"] > 0:
-            # Varredura percentual de 0% até -100% (fator de 1.0 até 0.0)
             melhor_fator = 1.0
             for f in np.linspace(1.0, 0.0, 1000):
                 res_f = self._analyze_scenario(f)
@@ -103,17 +102,17 @@ class ProjectAnalyzer:
                     melhor_fator = f
                 else:
                     break
-            # O limite é o quanto a receita pode cair (ex: se o VPL zera com fator 0.52, a queda limite é -48%)
             limite_viabilidade = melhor_fator - 1.0
         else:
             limite_viabilidade = 0.0 
 
-        # Classificação de Risco baseada na margem de queda suportada
-        queda_abs = abs(limite_viabilidade)
-        if queda_abs >= 0.30:
+        # Classificação de Risco estritamente baseada nos ângulos (30°, 45°, 60°)
+        if angulo < 30:
             risco = "BAIXO"
-        elif queda_abs >= 0.15:
-            risco = "MÉDIO"
+        elif angulo < 45:
+            risco = "MÉDIO-BAIXO"
+        elif angulo < 60:
+            risco = "MÉDIO-ALTO"
         else:
             risco = "ALTO"
 
@@ -140,7 +139,7 @@ class ProjectAnalyzer:
             
         score = max(0, min(100, score))
         
-        if score >= 80 and risco in ["BAIXO", "MÉDIO"]:
+        if score >= 80 and risco in ["BAIXO", "MÉDIO-BAIXO"]:
             veredito = "APROVADO"
         elif score < 50:
             veredito = "REPROVADO"
