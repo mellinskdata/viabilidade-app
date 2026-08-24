@@ -1,199 +1,178 @@
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
 import numpy as np
-import numpy_financial as npf
-import math
+from utils import parse_brl, format_brl, format_pct
+from core import ProjectAnalyzer
+from reports import generate_pdf_buffer
 
-class FinancialEngine:
-    @staticmethod
-    def calc_tma_mensal(tma_anual: float) -> float:
-        return (1 + tma_anual) ** (1/12) - 1
+# Configuração da Página
+st.set_page_config(page_title="Viabilidade Econômica", page_icon="📈", layout="centered")
 
-    @staticmethod
-    def calc_npv(rate: float, cash_flows: list) -> float:
-        return sum(cf / ((1 + rate) ** t) for t, cf in enumerate(cash_flows))
+# Cores e Estilo
+st.markdown("""
+    <style>
+    .big-font {font-size:20px !important;}
+    .aprovado {color: #2ecc71; font-weight: bold; font-size: 28px;}
+    .reprovado {color: #e74c3c; font-weight: bold; font-size: 28px;}
+    .revisao {color: #f1c40f; font-weight: bold; font-size: 28px;}
+    </style>
+""", unsafe_allow_html=True)
 
-    @staticmethod
-    def calc_irr(cash_flows: list):
-        try:
-            irr = npf.irr(cash_flows)
-            if irr is None or np.isnan(irr):
-                return None
-            return float(irr)
-        except:
-            return None
+# Inicializar Variáveis de Exemplo
+if "ex_nome" not in st.session_state:
+    st.session_state.update({
+        "ex_nome": "", "ex_tma": "", "ex_pro": "", "ex_inv": "", 
+        "ex_rec": "", "ex_cus": "", "ex_meses": "12"
+    })
 
-    @staticmethod
-    def calc_tirm(cash_flows: list, taxa_risco: float, taxa_seguranca: float):
-        n = len(cash_flows) - 1
-        if n <= 0: return None
-        
-        vp_negativos = 0.0
-        vf_positivos = 0.0
-        
-        for t, cf in enumerate(cash_flows):
-            if cf < 0:
-                vp_negativos += abs(cf) / ((1 + taxa_seguranca) ** t)
-            elif cf > 0:
-                vf_positivos += cf * ((1 + taxa_risco) ** (n - t))
-                
-        if vp_negativos == 0 or vf_positivos == 0:
-            return None
-            
-        return float((vf_positivos / vp_negativos) ** (1 / n) - 1)
+def carregar_exemplo():
+    st.session_state.update({
+        "ex_nome": "Trailer de Sukiyaki (Exemplo)", "ex_tma": "15,00", "ex_pro": "2.000,00", 
+        "ex_inv": "29.400,00", "ex_rec": "10.000,00", "ex_cus": "4.000,00", "ex_meses": "12"
+    })
 
-    @staticmethod
-    def calc_payback(cash_flows: list):
-        accumulated = 0.0
-        for t, cf in enumerate(cash_flows):
-            prev_accumulated = accumulated
-            accumulated += cf
-            if accumulated >= 0 and t > 0:
-                if cf == 0:
-                    return float(t)
-                fraction = abs(prev_accumulated) / cf
-                return float((t - 1) + fraction)
-        return None
+# Menu Lateral (Ajuda)
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=100)
+    st.title("Ajuda e Conceitos")
+    st.button("Carregar Dados de Exemplo", on_click=carregar_exemplo, use_container_width=True)
+    
+    with st.expander("O que significam as siglas?"):
+        st.write("**VPL:** Mostra se o negócio vai gerar lucro real acima da inflação/taxa exigida.")
+        st.write("**TIR:** É a rentabilidade do seu negócio.")
+        st.write("**TMA:** É o mínimo que você aceita ganhar (ex: poupança).")
+        st.write("**Payback:** Em quantos meses o dinheiro investido volta para o seu bolso.")
+        st.write("**Pró-Labore:** Seu salário como dono.")
 
-    @staticmethod
-    def calc_discounted_payback(rate: float, cash_flows: list):
-        accumulated = 0.0
-        for t, cf in enumerate(cash_flows):
-            discounted_cf = cf / ((1 + rate) ** t)
-            prev_accumulated = accumulated
-            accumulated += discounted_cf
-            if accumulated >= 0 and t > 0:
-                if discounted_cf == 0:
-                    return float(t)
-                fraction = abs(prev_accumulated) / discounted_cf
-                return float((t - 1) + fraction)
-        return None
+# Corpo do Site
+st.title("📊 Análise de Viabilidade Econômica")
+st.write("Descubra se o seu negócio vai dar lucro ou prejuízo de forma simples.")
 
-class ProjectAnalyzer:
-    def __init__(self, data: dict):
-        self.data = data
-        
-    def generate_cash_flows(self, variation_factor=1.0):
-        mode = self.data.get("mode", "average")
-        inv = self.data.get("investimento", 0.0)
-        pro_labore = self.data.get("pro_labore", 0.0)
-        
-        cfs = [-inv]
-        
-        if mode == "average":
-            meses = int(self.data.get("periodo_meses", 12))
-            rec = self.data.get("receita_media", 0.0) * variation_factor
-            cus = self.data.get("custo_medio", 0.0)
-            fluxo_mensal = rec - cus - pro_labore
-            cfs.extend([fluxo_mensal] * meses)
-        else:
-            mensais = self.data.get("dados_mensais", [])
-            for m in mensais:
-                rec = m.get("receita", 0.0) * variation_factor
-                cus = m.get("custo", 0.0)
-                cfs.append(rec - cus - pro_labore)
-                
-        return cfs
+# Passo 1
+st.header("1. Dados Básicos")
+col1, col2 = st.columns(2)
+nome = col1.text_input("Nome do Negócio", value=st.session_state.ex_nome)
+tipo = col2.radio("Situação", ["Negócio Futuro", "Negócio Existente (Já funciona)"])
 
-    def _analyze_scenario(self, variation_factor=1.0):
-        cfs = self.generate_cash_flows(variation_factor)
-        
-        tma_a = self.data.get("tma_anual", 0.0)
-        tma_m = FinancialEngine.calc_tma_mensal(tma_a)
-        
-        vpl = FinancialEngine.calc_npv(tma_m, cfs)
-        tir_m = FinancialEngine.calc_irr(cfs)
-        tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None
-        tirm_m = FinancialEngine.calc_tirm(cfs, tma_m, tma_m)
-        payback = FinancialEngine.calc_payback(cfs)
-        payback_desc = FinancialEngine.calc_discounted_payback(tma_m, cfs)
-        
-        return {
-            "cfs": cfs, "tma_m": tma_m, "tma_a": tma_a,
-            "vpl": vpl, "tir_m": tir_m, "tir_a": tir_a, "tirm_m": tirm_m,
-            "payback": payback, "payback_desc": payback_desc
+col3, col4 = st.columns(2)
+tma = col3.text_input("Taxa Mínima Aceitável ao ano (Ex: 15,00 para 15%)", value=st.session_state.ex_tma)
+pro_labore = col4.text_input("Pró-Labore Desejado por mês (R$)", value=st.session_state.ex_pro)
+
+# Passo 2
+st.header("2. Receitas e Custos")
+modo = st.radio("Como prefere preencher?", ["Usar Média Mensal (Mais Fácil)", "Preencher Mês a Mês (Detalhado)"])
+inv = st.text_input("Qual o Investimento Inicial? (R$)", value=st.session_state.ex_inv)
+
+dados_mensais = []
+periodo_meses = 0
+rec_media = 0
+cus_medio = 0
+
+if "Média" in modo:
+    col5, col6, col7 = st.columns(3)
+    rec_media_txt = col5.text_input("Receita Média por mês (R$)", value=st.session_state.ex_rec)
+    cus_medio_txt = col6.text_input("Custo Médio por mês (R$)", value=st.session_state.ex_cus)
+    meses_txt = col7.text_input("Analisar por quantos meses?", value=st.session_state.ex_meses)
+    
+    rec_media = parse_brl(rec_media_txt)
+    cus_medio = parse_brl(cus_medio_txt)
+    try: periodo_meses = int(meses_txt)
+    except: periodo_meses = 0
+
+else:
+    st.info("Altere os valores diretamente na tabela abaixo:")
+    df_padrao = pd.DataFrame([{"Mês": i+1, "Receita (R$)": 0.0, "Custo (R$)": 0.0} for i in range(12)])
+    df_editado = st.data_editor(df_padrao, num_rows="dynamic", use_container_width=True)
+    for index, row in df_editado.iterrows():
+        dados_mensais.append({"receita": float(row["Receita (R$)"]), "custo": float(row["Custo (R$)"])})
+    periodo_meses = len(dados_mensais)
+
+# Passo 3: Botão Gigante
+st.markdown("---")
+calcular = st.button("🚀 CLIQUE AQUI PARA CALCULAR VIABILIDADE", use_container_width=True, type="primary")
+
+if calcular:
+    investimento_float = parse_brl(inv)
+    
+    if investimento_float <= 0:
+        st.error("Por favor, preencha o Investimento Inicial com um valor maior que zero.")
+    elif periodo_meses <= 0:
+        st.error("O período de análise deve ter pelo menos 1 mês.")
+    else:
+        # Montar Dicionário pro Cérebro Financeiro
+        data = {
+            "nome": nome, "tipo": tipo, "tma_anual": parse_brl(tma) / 100.0,
+            "pro_labore": parse_brl(pro_labore), "investimento": investimento_float,
+            "mode": "average" if "Média" in modo else "monthly",
+            "receita_media": rec_media, "custo_medio": cus_medio,
+            "periodo_meses": periodo_meses, "dados_mensais": dados_mensais
         }
-
-    def analyze(self):
-        base = self._analyze_scenario(1.0)
-        tma_m = base["tma_m"]
         
-        low, high = 0.0, 1.0
-        fator_equilibrio = 1.0
-        
-        if base["vpl"] > 0:
-            if self._analyze_scenario(0.0)["vpl"] < 0:
-                for _ in range(50):
-                    mid = (low + high) / 2.0
-                    if self._analyze_scenario(mid)["vpl"] > 0:
-                        high = mid
-                    else:
-                        low = mid
-                fator_equilibrio = (low + high) / 2.0
+        with st.spinner("Analisando finanças..."):
+            analyzer = ProjectAnalyzer(data)
+            res = analyzer.analyze()
+            
+            # --- EXIBIÇÃO DOS RESULTADOS ---
+            st.markdown("---")
+            st.header("📋 Resultado da Análise")
+            
+            # Veredito Visual
+            if res['veredito'] == "APROVADO":
+                st.markdown(f"<p class='aprovado'>✅ {res['veredito']}</p>", unsafe_allow_html=True)
+                st.success("Parabéns! Financeiramente, este é um bom negócio para se investir.")
+            elif res['veredito'] == "REPROVADO":
+                st.markdown(f"<p class='reprovado'>❌ {res['veredito']}</p>", unsafe_allow_html=True)
+                st.error("Cuidado! Este projeto vai dar prejuízo ou não atinge o mínimo que você exigiu.")
             else:
-                fator_equilibrio = 0.0
-        else:
-            fator_equilibrio = 1.0
+                st.markdown(f"<p class='revisao'>⚠️ {res['veredito']}</p>", unsafe_allow_html=True)
+                st.warning("O negócio até se paga, mas apresenta riscos ou rentabilidade no limite. Estude com cautela.")
 
-        delta_x_pct = (1.0 - fator_equilibrio) * 100.0  
-        
-        angulo = 0.0
-        if base["tir_m"] is not None and delta_x_pct > 0:
-            tir_base_pct = base["tir_m"] * 100.0
-            tma_pct = tma_m * 100.0
-            delta_y = tir_base_pct - tma_pct
+            # Indicadores Principais em formato de Cards
+            st.subheader("Indicadores Principais")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("VPL (Lucro Real)", format_brl(res['base']['vpl']))
+            c2.metric("Rentabilidade (TIR/mês)", format_pct(res['base']['tir_m']))
             
-            if delta_y > 0:
-                tan_alpha = delta_y / delta_x_pct
-                angulo = math.degrees(math.atan(tan_alpha))
+            pb = f"{res['base']['payback']:.1f} meses" if res['base']['payback'] else "Não se paga"
+            c3.metric("Tempo de Retorno (Payback)", pb)
 
-        limite_viabilidade = fator_equilibrio - 1.0
-
-        if angulo < 30:
-            risco = "BAIXO"
-        elif angulo < 45:
-            risco = "MÉDIO-BAIXO"
-        elif angulo < 60:
-            risco = "MÉDIO-ALTO"
-        else:
-            risco = "ALTO"
-
-        score = 0
-        criterios = []
-        
-        if base["vpl"] > 0:
-            score += 40
-            criterios.append("VPL positivo (Gera Lucro)")
-        else:
-            criterios.append("VPL negativo")
+            # Risco e Pró Labore
+            c4, c5 = st.columns(2)
+            limite = format_pct(res['limite_viabilidade']) if res['limite_viabilidade'] else "Já nasce inviável"
+            c4.info(f"**📉 Risco {res['risco_classificacao']}**: O negócio quebra se as vendas caírem {limite}.")
             
-        if base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]:
-            score += 40
-            criterios.append("Rentabilidade superior à TMA")
-        else:
-            criterios.append("Rentabilidade abaixo da TMA")
+            if res['pl_cenario']:
+                if res['pl_recomendado']:
+                    c5.success("👔 **Pró-Labore:** O negócio consegue pagar o salário desejado tranquilamente.")
+                else:
+                    c5.error("👔 **Pró-Labore:** ATENÇÃO! Tirar esse salário vai quebrar a empresa.")
+            else:
+                c5.info("👔 **Pró-Labore:** Não foi solicitado cálculo de salário para o dono.")
             
-        if base["payback_desc"] is not None:
-            score += 20
-            criterios.append("Investimento recuperado no prazo")
-        else:
-            criterios.append("Investimento não recuperado")
+            # Gráfico Simples
+            st.subheader("O que acontece se as vendas caírem?")
+            x_vals = [(s['variacao'] * 100) for s in res['sensibilidade']]
+            y_vals = [(s['tir_m'] * 100 if s['tir_m'] else 0) for s in res['sensibilidade']]
             
-        score = max(0, min(100, score))
-        
-        if score >= 80 and risco in ["BAIXO", "MÉDIO-BAIXO"]:
-            veredito = "APROVADO"
-        elif score < 50:
-            veredito = "REPROVADO"
-        else:
-            veredito = "REVISÃO RECOMENDADA"
+            fig, ax = plt.subplots(figsize=(7, 3))
+            ax.plot(x_vals, y_vals, marker='o', color='#2980b9')
+            tma_p = res['base']['tma_m'] * 100
+            ax.axhline(y=tma_p, color='r', linestyle='--', label="O mínimo que você aceita")
+            ax.set_title("Efeito das vendas na Rentabilidade")
+            ax.set_xlabel("Se as vendas mudarem em (%)")
+            ax.set_ylabel("Rentabilidade ao mês (%)")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            st.pyplot(fig)
 
-        return {
-            "nome": self.data.get("nome", "Projeto"),
-            "tipo": self.data.get("tipo", "Futuro"),
-            "base": base,
-            "risco_angulo": angulo,
-            "risco_classificacao": risco,
-            "limite_viabilidade": limite_viabilidade,
-            "score": score,
-            "veredito": veredito,
-            "criterios": criterios
-        }
+            # Botão de Download PDF
+            st.markdown("---")
+            pdf_buffer = generate_pdf_buffer(res)
+            st.download_button(
+                label="📄 BAIXAR RELATÓRIO COMPLETO EM PDF",
+                data=pdf_buffer,
+                file_name=f"Relatorio_{nome.replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
