@@ -23,7 +23,6 @@ class FinancialEngine:
 
     @staticmethod
     def calc_tirm(cash_flows: list, taxa_risco: float, taxa_seguranca: float):
-        # TIRM - Capitalizando parcelas positivas e descontando negativas
         n = len(cash_flows) - 1
         if n <= 0: return None
         
@@ -43,7 +42,6 @@ class FinancialEngine:
 
     @staticmethod
     def calc_payback(cash_flows: list):
-        # Payback Simples
         accumulated = 0.0
         for t, cf in enumerate(cash_flows):
             prev_accumulated = accumulated
@@ -57,7 +55,6 @@ class FinancialEngine:
 
     @staticmethod
     def calc_discounted_payback(rate: float, cash_flows: list):
-        # Payback Descontado
         accumulated = 0.0
         for t, cf in enumerate(cash_flows):
             discounted_cf = cf / ((1 + rate) ** t)
@@ -99,19 +96,22 @@ class ProjectAnalyzer:
     def _analyze_scenario(self, variation_factor=1.0):
         cfs = self.generate_cash_flows(variation_factor)
         
-        # Considera a lógica de TMA da interface (se dada ao ano, converte; se for dita ao mês, adapte sua entrada)
         tma_a = self.data.get("tma_anual", 0.0)
         tma_m = FinancialEngine.calc_tma_mensal(tma_a)
         
         vpl = FinancialEngine.calc_npv(tma_m, cfs)
         tir_m = FinancialEngine.calc_irr(cfs)
+        
+        # CHAVE QUE FALTAVA E QUEBROU O APP:
+        tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None 
+        
         tirm_m = FinancialEngine.calc_tirm(cfs, tma_m, tma_m)
         payback = FinancialEngine.calc_payback(cfs)
         payback_desc = FinancialEngine.calc_discounted_payback(tma_m, cfs)
         
         return {
             "cfs": cfs, "tma_m": tma_m, "tma_a": tma_a,
-            "vpl": vpl, "tir_m": tir_m, "tirm_m": tirm_m,
+            "vpl": vpl, "tir_m": tir_m, "tir_a": tir_a, "tirm_m": tirm_m,
             "payback": payback, "payback_desc": payback_desc
         }
 
@@ -119,7 +119,6 @@ class ProjectAnalyzer:
         base = self._analyze_scenario(1.0)
         tma_m = base["tma_m"]
         
-        # Busca Binária rigorosa para encontrar o limite exato de viabilidade (VPL = 0)
         low, high = 0.0, 1.0
         fator_equilibrio = 1.0
         
@@ -137,25 +136,20 @@ class ProjectAnalyzer:
         else:
             fator_equilibrio = 1.0
 
-        # Lógica do Triângulo de Sensibilidade (Professor Carlos Roberto)
-        # Delta X = Variação percentual das vendas de 100% até o ponto de intersecção
         delta_x_pct = (1.0 - fator_equilibrio) * 100.0  
         
         angulo = 0.0
         if base["tir_m"] is not None and delta_x_pct > 0:
-            # Delta Y = TIR Base (%) - TMA (%)
             tir_base_pct = base["tir_m"] * 100.0
             tma_pct = tma_m * 100.0
             delta_y = tir_base_pct - tma_pct
             
             if delta_y > 0:
-                # tg(alpha) = Cateto Oposto (Delta Y) / Cateto Adjacente (Delta X)
                 tan_alpha = delta_y / delta_x_pct
                 angulo = math.degrees(math.atan(tan_alpha))
 
         limite_viabilidade = fator_equilibrio - 1.0
 
-        # Classificação de Risco (Limiares: 30°, 45°, 60°)
         if angulo < 30:
             risco = "BAIXO"
         elif angulo < 45:
