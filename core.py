@@ -22,18 +22,52 @@ class FinancialEngine:
             return None
 
     @staticmethod
+    def calc_tirm(cash_flows: list, taxa_risco: float, taxa_seguranca: float):
+        # TIRM - Capitalizando parcelas positivas e descontando negativas
+        n = len(cash_flows) - 1
+        if n <= 0: return None
+        
+        vp_negativos = 0.0
+        vf_positivos = 0.0
+        
+        for t, cf in enumerate(cash_flows):
+            if cf < 0:
+                vp_negativos += abs(cf) / ((1 + taxa_seguranca) ** t)
+            elif cf > 0:
+                vf_positivos += cf * ((1 + taxa_risco) ** (n - t))
+                
+        if vp_negativos == 0 or vf_positivos == 0:
+            return None
+            
+        return float((vf_positivos / vp_negativos) ** (1 / n) - 1)
+
+    @staticmethod
+    def calc_payback(cash_flows: list):
+        # Payback Simples
+        accumulated = 0.0
+        for t, cf in enumerate(cash_flows):
+            prev_accumulated = accumulated
+            accumulated += cf
+            if accumulated >= 0 and t > 0:
+                if cf == 0:
+                    return float(t)
+                fraction = abs(prev_accumulated) / cf
+                return float((t - 1) + fraction)
+        return None
+
+    @staticmethod
     def calc_discounted_payback(rate: float, cash_flows: list):
+        # Payback Descontado
         accumulated = 0.0
         for t, cf in enumerate(cash_flows):
             discounted_cf = cf / ((1 + rate) ** t)
             prev_accumulated = accumulated
             accumulated += discounted_cf
-            
             if accumulated >= 0 and t > 0:
                 if discounted_cf == 0:
-                    return t
+                    return float(t)
                 fraction = abs(prev_accumulated) / discounted_cf
-                return (t - 1) + fraction
+                return float((t - 1) + fraction)
         return None
 
 class ProjectAnalyzer:
@@ -64,56 +98,64 @@ class ProjectAnalyzer:
 
     def _analyze_scenario(self, variation_factor=1.0):
         cfs = self.generate_cash_flows(variation_factor)
+        
+        # Considera a lógica de TMA da interface (se dada ao ano, converte; se for dita ao mês, adapte sua entrada)
         tma_a = self.data.get("tma_anual", 0.0)
         tma_m = FinancialEngine.calc_tma_mensal(tma_a)
         
         vpl = FinancialEngine.calc_npv(tma_m, cfs)
         tir_m = FinancialEngine.calc_irr(cfs)
-        tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None
-        payback = FinancialEngine.calc_discounted_payback(tma_m, cfs)
+        tirm_m = FinancialEngine.calc_tirm(cfs, tma_m, tma_m)
+        payback = FinancialEngine.calc_payback(cfs)
+        payback_desc = FinancialEngine.calc_discounted_payback(tma_m, cfs)
         
         return {
             "cfs": cfs, "tma_m": tma_m, "tma_a": tma_a,
-            "vpl": vpl, "tir_m": tir_m, "tir_a": tir_a,
-            "payback": payback
+            "vpl": vpl, "tir_m": tir_m, "tirm_m": tirm_m,
+            "payback": payback, "payback_desc": payback_desc
         }
 
     def analyze(self):
         base = self._analyze_scenario(1.0)
         tma_m = base["tma_m"]
         
-        # 1. Encontrar o ponto exato de interseção (onde o VPL zera / cruza a TMA)
+        # Busca Binária rigorosa para encontrar o limite exato de viabilidade (VPL = 0)
+        low, high = 0.0, 1.0
         fator_equilibrio = 1.0
+        
         if base["vpl"] > 0:
-            for f in np.linspace(1.0, 0.0, 2000):
-                res_f = self._analyze_scenario(f)
-                if res_f["vpl"] >= 0:
-                    fator_equilibrio = f
-                else:
-                    break
+            if self._analyze_scenario(0.0)["vpl"] < 0:
+                for _ in range(50):
+                    mid = (low + high) / 2.0
+                    if self._analyze_scenario(mid)["vpl"] > 0:
+                        high = mid
+                    else:
+                        low = mid
+                fator_equilibrio = (low + high) / 2.0
+            else:
+                fator_equilibrio = 0.0
         else:
             fator_equilibrio = 1.0
 
-        # Delta X no método do professor: a distância percentual do 100% até o ponto de equilíbrio (ex: 100% - 85% = 15%)
+        # Lógica do Triângulo de Sensibilidade (Professor Carlos Roberto)
+        # Delta X = Variação percentual das vendas de 100% até o ponto de intersecção
         delta_x_pct = (1.0 - fator_equilibrio) * 100.0  
-        if delta_x_pct <= 0:
-            delta_x_pct = 1.0 # Evita divisão por zero se inviável
-
-        # Delta Y no método do professor: TIR Base (%) - TMA (%)
+        
         angulo = 0.0
-        if base["tir_m"] is not None:
+        if base["tir_m"] is not None and delta_x_pct > 0:
+            # Delta Y = TIR Base (%) - TMA (%)
             tir_base_pct = base["tir_m"] * 100.0
             tma_pct = tma_m * 100.0
-            delta_y = tir_base_pct - tma_pct  # Cateto oposto
+            delta_y = tir_base_pct - tma_pct
             
             if delta_y > 0:
-                # Tangente do ângulo α = Delta Y / Delta X (em %)
+                # tg(alpha) = Cateto Oposto (Delta Y) / Cateto Adjacente (Delta X)
                 tan_alpha = delta_y / delta_x_pct
                 angulo = math.degrees(math.atan(tan_alpha))
 
         limite_viabilidade = fator_equilibrio - 1.0
 
-        # Classificação de Risco estritamente pelos patamares de ângulo do professor (30°, 45°, 60°)
+        # Classificação de Risco (Limiares: 30°, 45°, 60°)
         if angulo < 30:
             risco = "BAIXO"
         elif angulo < 45:
@@ -138,7 +180,7 @@ class ProjectAnalyzer:
         else:
             criterios.append("Rentabilidade abaixo da TMA")
             
-        if base["payback"] is not None:
+        if base["payback_desc"] is not None:
             score += 20
             criterios.append("Investimento recuperado no prazo")
         else:
