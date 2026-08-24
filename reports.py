@@ -15,7 +15,7 @@ def generate_pdf_buffer(results):
     
     elements = []
     
-    elements.append(Paragraph("Relatorio de Viabilidade Economica", title_style))
+    elements.append(Paragraph("Relatório de Viabilidade Econômica", title_style))
     elements.append(Paragraph(f"<b>Projeto:</b> {results['nome']}", normal))
     elements.append(Paragraph(f"<b>Tipo:</b> {results['tipo']}", normal))
     elements.append(Spacer(1, 15))
@@ -30,13 +30,11 @@ def generate_pdf_buffer(results):
     
     data_ind = [
         ["Indicador", "Valor Calculado"],
-        ["VPL (Valor Presente Liquido)", format_brl(base['vpl'])],
+        ["VPL (Valor Presente Líquido)", format_brl(base['vpl'])],
         ["TIR Mensal", format_pct(base['tir_m'])],
-        ["TIR Anual", format_pct(base['tir_a'])],
         ["TIRM Mensal", format_pct(base['tirm_m'])],
-        ["TIRM Anual", format_pct(base['tirm_a'])],
-        ["Payback Simples", f"{base['payback_simples']:.1f} meses" if base['payback_simples'] else "Nao recupera"],
-        ["Payback Descontado", f"{base['payback_descontado']:.1f} meses" if base['payback_descontado'] else "Nao recupera"]
+        ["Payback Simples", f"{base['payback_simples']:.1f} meses" if base['payback_simples'] else "Não recupera"],
+        ["Payback Descontado", f"{base['payback_descontado']:.1f} meses" if base['payback_descontado'] else "Não recupera"]
     ]
     t_ind = Table(data_ind, colWidths=[200, 200])
     t_ind.setStyle(TableStyle([
@@ -50,17 +48,17 @@ def generate_pdf_buffer(results):
     ]))
     elements.append(t_ind)
     
-    elements.append(Paragraph("3. ANALISE DE RISCO E SENSIBILIDADE", h2_style))
+    elements.append(Paragraph("3. ANÁLISE DE RISCO E SENSIBILIDADE", h2_style))
     
     if results['risco_angulo'] is not None:
-        texto_risco = f"<b>Classificacao de Risco:</b> {results['risco_classificacao']} (Angulo de Sensibilidade: {results['risco_angulo']:.1f} graus)"
+        texto_risco = f"<b>Classificação de Risco:</b> {results['risco_classificacao']} (Ângulo de Sensibilidade: {results['risco_angulo']:.1f} graus)"
     else:
-        texto_risco = "<b>Classificacao de Risco:</b> Indefinido"
+        texto_risco = "<b>Classificação de Risco:</b> Indefinido"
         
     elements.append(Paragraph(texto_risco, normal))
     
     lim = format_pct(results['limite_viabilidade']) if results['limite_viabilidade'] is not None else "N/A"
-    elements.append(Paragraph(f"<b>Ponto de Inviabilidade:</b> O negocio entra no prejuizo (VPL negativo) caso as vendas sofram uma queda de {lim}.", normal))
+    elements.append(Paragraph(f"<b>Ponto de Inviabilidade:</b> O negócio entra no prejuízo (VPL negativo) caso as receitas caiam {lim}.", normal))
     
     doc.build(elements)
     buffer.seek(0)
