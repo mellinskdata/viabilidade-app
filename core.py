@@ -22,36 +22,14 @@ class FinancialEngine:
             return None
 
     @staticmethod
-    def calc_tirm(cash_flows: list, taxa_risco: float, taxa_seguranca: float):
-        n = len(cash_flows) - 1
-        if n <= 0: return None
-        
-        vp_negativos = 0.0
-        vf_positivos = 0.0
-        
-        for t, cf in enumerate(cash_flows):
-            if cf < 0:
-                vp_negativos += abs(cf) / ((1 + taxa_seguranca) ** t)
-            elif cf > 0:
-                vf_positivos += cf * ((1 + taxa_risco) ** (n - t))
-                
-        if vp_negativos == 0 or vf_positivos == 0:
+    def calc_mirr(cash_flows: list, finance_rate: float, reinvest_rate: float):
+        try:
+            mirr = npf.mirr(cash_flows, finance_rate, reinvest_rate)
+            if mirr is None or np.isnan(mirr):
+                return None
+            return float(mirr)
+        except:
             return None
-            
-        return float((vf_positivos / vp_negativos) ** (1 / n) - 1)
-
-    @staticmethod
-    def calc_payback(cash_flows: list):
-        accumulated = 0.0
-        for t, cf in enumerate(cash_flows):
-            prev_accumulated = accumulated
-            accumulated += cf
-            if accumulated >= 0 and t > 0:
-                if cf == 0:
-                    return float(t)
-                fraction = abs(prev_accumulated) / cf
-                return float((t - 1) + fraction)
-        return None
 
     @staticmethod
     def calc_discounted_payback(rate: float, cash_flows: list):
@@ -60,21 +38,22 @@ class FinancialEngine:
             discounted_cf = cf / ((1 + rate) ** t)
             prev_accumulated = accumulated
             accumulated += discounted_cf
+            
             if accumulated >= 0 and t > 0:
                 if discounted_cf == 0:
-                    return float(t)
+                    return t
                 fraction = abs(prev_accumulated) / discounted_cf
-                return float((t - 1) + fraction)
+                return (t - 1) + fraction
         return None
 
 class ProjectAnalyzer:
     def __init__(self, data: dict):
         self.data = data
         
-    def generate_cash_flows(self, variation_factor=1.0):
+    def generate_cash_flows(self, variation_factor=1.0, apply_pro_labore=False):
         mode = self.data.get("mode", "average")
         inv = self.data.get("investimento", 0.0)
-        pro_labore = self.data.get("pro_labore", 0.0)
+        pro_labore = self.data.get("pro_labore", 0.0) if apply_pro_labore else 0.0
         
         cfs = [-inv]
         
@@ -93,110 +72,106 @@ class ProjectAnalyzer:
                 
         return cfs
 
-    def _analyze_scenario(self, variation_factor=1.0):
-        cfs = self.generate_cash_flows(variation_factor)
-        
+    def _analyze_scenario(self, variation_factor=1.0, apply_pro_labore=False):
+        cfs = self.generate_cash_flows(variation_factor, apply_pro_labore)
         tma_a = self.data.get("tma_anual", 0.0)
         tma_m = FinancialEngine.calc_tma_mensal(tma_a)
         
         vpl = FinancialEngine.calc_npv(tma_m, cfs)
         tir_m = FinancialEngine.calc_irr(cfs)
-        
-        # CHAVE QUE FALTAVA E QUEBROU O APP:
-        tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None 
-        
-        tirm_m = FinancialEngine.calc_tirm(cfs, tma_m, tma_m)
-        payback = FinancialEngine.calc_payback(cfs)
-        payback_desc = FinancialEngine.calc_discounted_payback(tma_m, cfs)
+        tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None
+        tirm_m = FinancialEngine.calc_mirr(cfs, tma_m, tma_m)
+        tirm_a = ((1 + tirm_m)**12 - 1) if tirm_m is not None else None
+        payback = FinancialEngine.calc_discounted_payback(tma_m, cfs)
         
         return {
             "cfs": cfs, "tma_m": tma_m, "tma_a": tma_a,
-            "vpl": vpl, "tir_m": tir_m, "tir_a": tir_a, "tirm_m": tirm_m,
-            "payback": payback, "payback_desc": payback_desc
+            "vpl": vpl, "tir_m": tir_m, "tir_a": tir_a,
+            "tirm_m": tirm_m, "tirm_a": tirm_a, "payback": payback
         }
 
     def analyze(self):
-        base = self._analyze_scenario(1.0)
-        tma_m = base["tma_m"]
+        base = self._analyze_scenario(1.0, False)
         
-        low, high = 0.0, 1.0
-        fator_equilibrio = 1.0
-        
-        if base["vpl"] > 0:
-            if self._analyze_scenario(0.0)["vpl"] < 0:
-                for _ in range(50):
-                    mid = (low + high) / 2.0
-                    if self._analyze_scenario(mid)["vpl"] > 0:
-                        high = mid
-                    else:
-                        low = mid
-                fator_equilibrio = (low + high) / 2.0
-            else:
-                fator_equilibrio = 0.0
-        else:
-            fator_equilibrio = 1.0
-
-        delta_x_pct = (1.0 - fator_equilibrio) * 100.0  
-        
-        angulo = 0.0
-        if base["tir_m"] is not None and delta_x_pct > 0:
-            tir_base_pct = base["tir_m"] * 100.0
-            tma_pct = tma_m * 100.0
-            delta_y = tir_base_pct - tma_pct
+        # 1. Sensibilidade
+        sensibilidade = []
+        fatores = [1.3, 1.2, 1.1, 1.0, 0.9, 0.8, 0.7, 0.6]
+        for f in fatores:
+            res = self._analyze_scenario(f, False)
+            sensibilidade.append({"variacao": f - 1.0, "tir_m": res["tir_m"], "vpl": res["vpl"]})
             
-            if delta_y > 0:
-                tan_alpha = delta_y / delta_x_pct
-                angulo = math.degrees(math.atan(tan_alpha))
-
-        limite_viabilidade = fator_equilibrio - 1.0
-
-        if angulo < 30:
-            risco = "BAIXO"
-        elif angulo < 45:
-            risco = "MÉDIO-BAIXO"
-        elif angulo < 60:
-            risco = "MÉDIO-ALTO"
+        # 2. Risco Angular
+        cenario_20 = self._analyze_scenario(0.8, False)
+        if base["tir_m"] is not None and cenario_20["tir_m"] is not None:
+            delta_tir = (base["tir_m"] * 100) - (cenario_20["tir_m"] * 100)
+            delta_vendas = 20.0
+            m = abs(delta_tir / delta_vendas)
+            angulo = math.degrees(math.atan(m))
         else:
-            risco = "ALTO"
+            angulo = None
 
+        if angulo is None: risco = "INDEFINIDO"
+        elif angulo < 30: risco = "BAIXO"
+        elif angulo < 45: risco = "MÉDIO"
+        elif angulo < 60: risco = "ALTO"
+        else: risco = "MUITO ALTO"
+
+        # 3. Limite de Viabilidade
+        limite_viabilidade = None
+        if base["vpl"] > 0:
+            for factor in np.arange(1.0, -0.01, -0.01):
+                res_limite = self._analyze_scenario(factor, False)
+                if res_limite["vpl"] < 0:
+                    limite_viabilidade = factor - 1.0
+                    break
+        elif base["vpl"] < 0:
+            limite_viabilidade = 0.0 
+
+        # 4. Pró-Labore Analysis
+        pl_val = self.data.get("pro_labore", 0.0)
+        pl_analise = None
+        pl_recomendado = False
+        if pl_val > 0:
+            pl_analise = self._analyze_scenario(1.0, True)
+            if pl_analise["vpl"] > 0 and (pl_analise["tir_m"] is not None and pl_analise["tir_m"] >= pl_analise["tma_m"]):
+                pl_recomendado = True
+
+        # 5. Score e Veredito
         score = 0
         criterios = []
         
         if base["vpl"] > 0:
-            score += 40
-            criterios.append("VPL positivo (Gera Lucro)")
+            score += 30
+            criterios.append(("[✓]", "VPL positivo"))
         else:
-            criterios.append("VPL negativo")
+            criterios.append(("[X]", "VPL negativo"))
             
         if base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]:
-            score += 40
-            criterios.append("Rentabilidade superior à TMA")
+            score += 30
+            criterios.append(("[✓]", "TIR superior/igual à TMA"))
         else:
-            criterios.append("Rentabilidade abaixo da TMA")
+            criterios.append(("[X]", "TIR inferior à TMA ou inexistente"))
             
-        if base["payback_desc"] is not None:
+        if base["payback"] is not None:
             score += 20
-            criterios.append("Investimento recuperado no prazo")
+            criterios.append(("[✓]", "Payback dentro do período"))
         else:
-            criterios.append("Investimento não recuperado")
+            criterios.append(("[X]", "Investimento não recuperado no período"))
             
+        risco_pontos = {"BAIXO": 20, "MÉDIO": 10, "ALTO": 0, "MUITO ALTO": -10, "INDEFINIDO": 0}
+        score += risco_pontos.get(risco, 0)
         score = max(0, min(100, score))
         
-        if score >= 80 and risco in ["BAIXO", "MÉDIO-BAIXO"]:
-            veredito = "APROVADO"
-        elif score < 50:
-            veredito = "REPROVADO"
-        else:
-            veredito = "REVISÃO RECOMENDADA"
+        if score >= 80: veredito = "APROVADO"
+        elif score < 50: veredito = "REPROVADO"
+        else: veredito = "REVISÃO RECOMENDADA"
 
         return {
             "nome": self.data.get("nome", "Projeto"),
             "tipo": self.data.get("tipo", "Futuro"),
-            "base": base,
-            "risco_angulo": angulo,
-            "risco_classificacao": risco,
+            "base": base, "sensibilidade": sensibilidade,
+            "risco_angulo": angulo, "risco_classificacao": risco,
             "limite_viabilidade": limite_viabilidade,
-            "score": score,
-            "veredito": veredito,
-            "criterios": criterios
+            "pl_cenario": pl_analise, "pl_recomendado": pl_recomendado,
+            "score": score, "veredito": veredito, "criterios": criterios
         }
