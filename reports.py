@@ -1,10 +1,8 @@
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-import matplotlib.pyplot as plt
 import io
-import numpy as np
 from utils import format_brl, format_pct
 
 def generate_pdf_buffer(results):
@@ -20,7 +18,7 @@ def generate_pdf_buffer(results):
     elements.append(Paragraph("Relatorio de Viabilidade Economica", title_style))
     elements.append(Paragraph(f"<b>Projeto:</b> {results['nome']}", normal))
     elements.append(Paragraph(f"<b>Tipo:</b> {results['tipo']}", normal))
-    elements.append(Spacer(1, 20))
+    elements.append(Spacer(1, 15))
     
     elements.append(Paragraph("1. VEREDITO FINAL", h2_style))
     elements.append(Paragraph(f"<b>Resultado:</b> {results['veredito']} (Score Geral: {results['score']}/100)", normal))
@@ -63,31 +61,6 @@ def generate_pdf_buffer(results):
     
     lim = format_pct(results['limite_viabilidade']) if results['limite_viabilidade'] is not None else "N/A"
     elements.append(Paragraph(f"<b>Ponto de Inviabilidade:</b> O negocio entra no prejuizo (VPL negativo) caso as vendas sofram uma queda de {lim}.", normal))
-    
-    # Gerar Grafico em Memoria
-    plt.figure(figsize=(6, 3.5))
-    x_vals = [(s['variacao'] * 100) for s in results['sensibilidade']]
-    y_vals = [(s['tir_m'] * 100 if s['tir_m'] else 0) for s in results['sensibilidade']]
-    plt.plot(x_vals, y_vals, marker='o', label="TIR Projetada")
-    
-    tma_p = base['tma_m'] * 100
-    plt.axhline(y=tma_p, color='r', linestyle='--', label=f"TMA Mensal ({tma_p:.2f}%)")
-    plt.fill_between(x_vals, y_vals, tma_p, where=(np.array(y_vals) > tma_p), interpolate=True, color='green', alpha=0.15)
-    plt.fill_between(x_vals, y_vals, tma_p, where=(np.array(y_vals) <= tma_p), interpolate=True, color='red', alpha=0.15)
-    
-    plt.title("Analise de Sensibilidade da TIR")
-    plt.xlabel("Variacao nas Vendas (%)")
-    plt.ylabel("TIR Mensal (%)")
-    plt.grid(True)
-    plt.legend()
-    
-    img_data = io.BytesIO()
-    plt.savefig(img_data, format='png', bbox_inches='tight')
-    img_data.seek(0)
-    plt.close()
-    
-    elements.append(Spacer(1, 15))
-    elements.append(Image(img_data, width=420, height=245))
     
     doc.build(elements)
     buffer.seek(0)
