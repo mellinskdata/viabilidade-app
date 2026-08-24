@@ -32,6 +32,20 @@ class FinancialEngine:
             return None
 
     @staticmethod
+    def calc_simple_payback(cash_flows: list):
+        accumulated = 0.0
+        for t, cf in enumerate(cash_flows):
+            prev_accumulated = accumulated
+            accumulated += cf
+            
+            if accumulated >= 0 and t > 0:
+                if cf == 0:
+                    return float(t)
+                fraction = abs(prev_accumulated) / cf
+                return float((t - 1) + fraction)
+        return None
+
+    @staticmethod
     def calc_discounted_payback(rate: float, cash_flows: list):
         accumulated = 0.0
         for t, cf in enumerate(cash_flows):
@@ -41,9 +55,9 @@ class FinancialEngine:
             
             if accumulated >= 0 and t > 0:
                 if discounted_cf == 0:
-                    return t
+                    return float(t)
                 fraction = abs(prev_accumulated) / discounted_cf
-                return (t - 1) + fraction
+                return float((t - 1) + fraction)
         return None
 
 class ProjectAnalyzer:
@@ -82,12 +96,15 @@ class ProjectAnalyzer:
         tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None
         tirm_m = FinancialEngine.calc_mirr(cfs, tma_m, tma_m)
         tirm_a = ((1 + tirm_m)**12 - 1) if tirm_m is not None else None
-        payback = FinancialEngine.calc_discounted_payback(tma_m, cfs)
+        payback_simples = FinancialEngine.calc_simple_payback(cfs)
+        payback_desc = FinancialEngine.calc_discounted_payback(tma_m, cfs)
         
         return {
             "cfs": cfs, "tma_m": tma_m, "tma_a": tma_a,
             "vpl": vpl, "tir_m": tir_m, "tir_a": tir_a,
-            "tirm_m": tirm_m, "tirm_a": tirm_a, "payback": payback
+            "tirm_m": tirm_m, "tirm_a": tirm_a, 
+            "payback_simples": payback_simples, 
+            "payback_descontado": payback_desc
         }
 
     def analyze(self):
@@ -100,34 +117,46 @@ class ProjectAnalyzer:
             res = self._analyze_scenario(f, False)
             sensibilidade.append({"variacao": f - 1.0, "tir_m": res["tir_m"], "vpl": res["vpl"]})
             
-        # 2. Risco Angular
-        cenario_20 = self._analyze_scenario(0.8, False)
-        if base["tir_m"] is not None and cenario_20["tir_m"] is not None:
-            delta_tir = (base["tir_m"] * 100) - (cenario_20["tir_m"] * 100)
-            delta_vendas = 20.0
-            m = abs(delta_tir / delta_vendas)
-            angulo = math.degrees(math.atan(m))
+        # 2. Limite de Viabilidade (Busca Binaria - Interseccao Exata onde VPL zera)
+        limite_viabilidade = None
+        f_limit = 1.0
+        
+        if base["vpl"] > 0:
+            low, high = 0.0, 1.0
+            for _ in range(50):
+                mid = (low + high) / 2.0
+                if self._analyze_scenario(mid, False)["vpl"] > 0:
+                    high = mid
+                else:
+                    low = mid
+            f_limit = (low + high) / 2.0
+            limite_viabilidade = 1.0 - f_limit
+        elif base["vpl"] < 0:
+            limite_viabilidade = 0.0
+            f_limit = 1.0
+
+        # 3. Risco Angular (Metodologia Prof. Carlos Roberto Ferreira)
+        if base["tir_m"] is not None and limite_viabilidade is not None and limite_viabilidade > 0:
+            # delta_y: variacao vertical em pontos percentuais (TIR base - TMA)
+            delta_y = (base["tir_m"] * 100.0) - (base["tma_m"] * 100.0)
+            # delta_x: variacao horizontal em pontos percentuais ate zerar o VPL (Queda limite)
+            delta_x = limite_viabilidade * 100.0
+            
+            if delta_x > 0:
+                m = delta_y / delta_x
+                angulo = math.degrees(math.atan(m))
+            else:
+                angulo = 90.0
         else:
             angulo = None
 
         if angulo is None: risco = "INDEFINIDO"
         elif angulo < 30: risco = "BAIXO"
-        elif angulo < 45: risco = "MÉDIO"
+        elif angulo < 45: risco = "MEDIO"
         elif angulo < 60: risco = "ALTO"
         else: risco = "MUITO ALTO"
 
-        # 3. Limite de Viabilidade
-        limite_viabilidade = None
-        if base["vpl"] > 0:
-            for factor in np.arange(1.0, -0.01, -0.01):
-                res_limite = self._analyze_scenario(factor, False)
-                if res_limite["vpl"] < 0:
-                    limite_viabilidade = factor - 1.0
-                    break
-        elif base["vpl"] < 0:
-            limite_viabilidade = 0.0 
-
-        # 4. Pró-Labore Analysis
+        # 4. Pro-Labore Analysis
         pl_val = self.data.get("pro_labore", 0.0)
         pl_analise = None
         pl_recomendado = False
@@ -142,29 +171,29 @@ class ProjectAnalyzer:
         
         if base["vpl"] > 0:
             score += 30
-            criterios.append(("[✓]", "VPL positivo"))
+            criterios.append(("[APROVADO]", "VPL positivo"))
         else:
-            criterios.append(("[X]", "VPL negativo"))
+            criterios.append(("[REPROVADO]", "VPL negativo"))
             
         if base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]:
             score += 30
-            criterios.append(("[✓]", "TIR superior/igual à TMA"))
+            criterios.append(("[APROVADO]", "TIR superior ou igual a TMA"))
         else:
-            criterios.append(("[X]", "TIR inferior à TMA ou inexistente"))
+            criterios.append(("[REPROVADO]", "TIR inferior a TMA ou inexistente"))
             
-        if base["payback"] is not None:
+        if base["payback_descontado"] is not None:
             score += 20
-            criterios.append(("[✓]", "Payback dentro do período"))
+            criterios.append(("[APROVADO]", "Payback dentro do periodo analisado"))
         else:
-            criterios.append(("[X]", "Investimento não recuperado no período"))
+            criterios.append(("[REPROVADO]", "Investimento nao recuperado no periodo"))
             
-        risco_pontos = {"BAIXO": 20, "MÉDIO": 10, "ALTO": 0, "MUITO ALTO": -10, "INDEFINIDO": 0}
+        risco_pontos = {"BAIXO": 20, "MEDIO": 10, "ALTO": 0, "MUITO ALTO": -10, "INDEFINIDO": 0}
         score += risco_pontos.get(risco, 0)
         score = max(0, min(100, score))
         
         if score >= 80: veredito = "APROVADO"
         elif score < 50: veredito = "REPROVADO"
-        else: veredito = "REVISÃO RECOMENDADA"
+        else: veredito = "REVISAO RECOMENDADA"
 
         return {
             "nome": self.data.get("nome", "Projeto"),
