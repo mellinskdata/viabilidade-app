@@ -1,84 +1,199 @@
-import streamlit as st
-from core import ProjectAnalyzer
-from reports import generate_pdf_buffer
+import numpy as np
+import numpy_financial as npf
+import math
 
-st.set_page_config(page_title="Análise de Viabilidade Financeira", layout="wide")
+class FinancialEngine:
+    @staticmethod
+    def calc_tma_mensal(tma_anual: float) -> float:
+        return (1 + tma_anual) ** (1/12) - 1
 
-st.title("Análise de Viabilidade de Projetos")
+    @staticmethod
+    def calc_npv(rate: float, cash_flows: list) -> float:
+        return sum(cf / ((1 + rate) ** t) for t, cf in enumerate(cash_flows))
 
-st.sidebar.header("Parâmetros do Projeto")
-nome_projeto = st.sidebar.text_input("Nome do Projeto", "Cafeteria")
-tipo_projeto = st.sidebar.selectbox("Tipo de Projeto", ["Futuro", "Existente"])
+    @staticmethod
+    def calc_irr(cash_flows: list):
+        try:
+            irr = npf.irr(cash_flows)
+            if irr is None or np.isnan(irr):
+                return None
+            return float(irr)
+        except:
+            return None
 
-investimento = st.sidebar.number_input("Investimento Inicial (R$)", min_value=0.0, value=80000.0, step=1000.0)
-tma_anual = st.sidebar.number_input("TMA Anual (%)", min_value=0.0, value=12.0, step=0.5) / 100.0
-pro_labore = st.sidebar.number_input("Pró-Labore / Custos Fixos Extra (R$)", min_value=0.0, value=0.0, step=100.0)
+    @staticmethod
+    def calc_tirm(cash_flows: list, taxa_risco: float, taxa_seguranca: float):
+        n = len(cash_flows) - 1
+        if n <= 0: return None
+        
+        vp_negativos = 0.0
+        vf_positivos = 0.0
+        
+        for t, cf in enumerate(cash_flows):
+            if cf < 0:
+                vp_negativos += abs(cf) / ((1 + taxa_seguranca) ** t)
+            elif cf > 0:
+                vf_positivos += cf * ((1 + taxa_risco) ** (n - t))
+                
+        if vp_negativos == 0 or vf_positivos == 0:
+            return None
+            
+        return float((vf_positivos / vp_negativos) ** (1 / n) - 1)
 
-mode = st.sidebar.radio("Modo de Entrada", ["Média Mensal", "Lançamentos Mensais"])
+    @staticmethod
+    def calc_payback(cash_flows: list):
+        accumulated = 0.0
+        for t, cf in enumerate(cash_flows):
+            prev_accumulated = accumulated
+            accumulated += cf
+            if accumulated >= 0 and t > 0:
+                if cf == 0:
+                    return float(t)
+                fraction = abs(prev_accumulated) / cf
+                return float((t - 1) + fraction)
+        return None
 
-if mode == "Média Mensal":
-    periodo_meses = st.sidebar.number_input("Período (Meses)", min_value=1, value=36, step=1)
-    receita_media = st.sidebar.number_input("Receita Média Mensal (R$)", min_value=0.0, value=10000.0, step=500.0)
-    custo_medio = st.sidebar.number_input("Custo Médio Mensal (R$)", min_value=0.0, value=5000.0, step=500.0)
-    
-    data_input = {
-        "nome": nome_projeto,
-        "tipo": tipo_projeto,
-        "mode": "average",
-        "investimento": investimento,
-        "tma_anual": tma_anual,
-        "pro_labore": pro_labore,
-        "periodo_meses": periodo_meses,
-        "receita_media": receita_media,
-        "custo_medio": custo_medio
-    }
-else:
-    st.sidebar.info("Preencha os lançamentos mensais no painel central.")
-    data_input = {
-        "nome": nome_projeto,
-        "tipo": tipo_projeto,
-        "mode": "custom",
-        "investimento": investimento,
-        "tma_anual": tma_anual,
-        "pro_labore": pro_labore,
-        "dados_mensais": []
-    }
+    @staticmethod
+    def calc_discounted_payback(rate: float, cash_flows: list):
+        accumulated = 0.0
+        for t, cf in enumerate(cash_flows):
+            discounted_cf = cf / ((1 + rate) ** t)
+            prev_accumulated = accumulated
+            accumulated += discounted_cf
+            if accumulated >= 0 and t > 0:
+                if discounted_cf == 0:
+                    return float(t)
+                fraction = abs(prev_accumulated) / discounted_cf
+                return float((t - 1) + fraction)
+        return None
 
-analyzer = ProjectAnalyzer(data_input)
-res = analyzer.analyze()
+class ProjectAnalyzer:
+    def __init__(self, data: dict):
+        self.data = data
+        
+    def generate_cash_flows(self, variation_factor=1.0):
+        mode = self.data.get("mode", "average")
+        inv = self.data.get("investimento", 0.0)
+        pro_labore = self.data.get("pro_labore", 0.0)
+        
+        cfs = [-inv]
+        
+        if mode == "average":
+            meses = int(self.data.get("periodo_meses", 12))
+            rec = self.data.get("receita_media", 0.0) * variation_factor
+            cus = self.data.get("custo_medio", 0.0)
+            fluxo_mensal = rec - cus - pro_labore
+            cfs.extend([fluxo_mensal] * meses)
+        else:
+            mensais = self.data.get("dados_mensais", [])
+            for m in mensais:
+                rec = m.get("receita", 0.0) * variation_factor
+                cus = m.get("custo", 0.0)
+                cfs.append(rec - cus - pro_labore)
+                
+        return cfs
 
-st.subheader("Indicadores Financeiros Principais")
+    def _analyze_scenario(self, variation_factor=1.0):
+        cfs = self.generate_cash_flows(variation_factor)
+        
+        tma_a = self.data.get("tma_anual", 0.0)
+        tma_m = FinancialEngine.calc_tma_mensal(tma_a)
+        
+        vpl = FinancialEngine.calc_npv(tma_m, cfs)
+        tir_m = FinancialEngine.calc_irr(cfs)
+        tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None
+        tirm_m = FinancialEngine.calc_tirm(cfs, tma_m, tma_m)
+        payback = FinancialEngine.calc_payback(cfs)
+        payback_desc = FinancialEngine.calc_discounted_payback(tma_m, cfs)
+        
+        return {
+            "cfs": cfs, "tma_m": tma_m, "tma_a": tma_a,
+            "vpl": vpl, "tir_m": tir_m, "tir_a": tir_a, "tirm_m": tirm_m,
+            "payback": payback, "payback_desc": payback_desc
+        }
 
-base = res['base']
+    def analyze(self):
+        base = self._analyze_scenario(1.0)
+        tma_m = base["tma_m"]
+        
+        low, high = 0.0, 1.0
+        fator_equilibrio = 1.0
+        
+        if base["vpl"] > 0:
+            if self._analyze_scenario(0.0)["vpl"] < 0:
+                for _ in range(50):
+                    mid = (low + high) / 2.0
+                    if self._analyze_scenario(mid)["vpl"] > 0:
+                        high = mid
+                    else:
+                        low = mid
+                fator_equilibrio = (low + high) / 2.0
+            else:
+                fator_equilibrio = 0.0
+        else:
+            fator_equilibrio = 1.0
 
-col1, col2, col3, col4 = st.columns(4)
+        delta_x_pct = (1.0 - fator_equilibrio) * 100.0  
+        
+        angulo = 0.0
+        if base["tir_m"] is not None and delta_x_pct > 0:
+            tir_base_pct = base["tir_m"] * 100.0
+            tma_pct = tma_m * 100.0
+            delta_y = tir_base_pct - tma_pct
+            
+            if delta_y > 0:
+                tan_alpha = delta_y / delta_x_pct
+                angulo = math.degrees(math.atan(tan_alpha))
 
-with col1:
-    st.metric("VPL", f"R$ {base['vpl']:,.2f}")
-    st.metric("TIR Mensal", f"{base['tir_m']*100:.2f}%" if base['tir_m'] is not None else "-")
-    st.metric("TIR Anual", f"{base['tir_a']*100:.2f}%" if base['tir_a'] is not None else "-")
+        limite_viabilidade = fator_equilibrio - 1.0
 
-with col2:
-    st.metric("TIRM Mensal", f"{base['tirm_m']*100:.2f}%" if base['tirm_m'] is not None else "-")
-    st.metric("Payback Simples", f"{base['payback']:.1f} meses" if base['payback'] is not None else "Não atinge")
-    st.metric("Payback Descontado", f"{base['payback_desc']:.1f} meses" if base['payback_desc'] is not None else "Não atinge")
+        if angulo < 30:
+            risco = "BAIXO"
+        elif angulo < 45:
+            risco = "MÉDIO-BAIXO"
+        elif angulo < 60:
+            risco = "MÉDIO-ALTO"
+        else:
+            risco = "ALTO"
 
-with col3:
-    st.metric("Queda Limite (Vendas)", f"{res['limite_viabilidade']*100:.1f}%")
-    st.metric("Ângulo de Risco", f"{res['risco_angulo']:.2f}°")
+        score = 0
+        criterios = []
+        
+        if base["vpl"] > 0:
+            score += 40
+            criterios.append("VPL positivo (Gera Lucro)")
+        else:
+            criterios.append("VPL negativo")
+            
+        if base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]:
+            score += 40
+            criterios.append("Rentabilidade superior à TMA")
+        else:
+            criterios.append("Rentabilidade abaixo da TMA")
+            
+        if base["payback_desc"] is not None:
+            score += 20
+            criterios.append("Investimento recuperado no prazo")
+        else:
+            criterios.append("Investimento não recuperado")
+            
+        score = max(0, min(100, score))
+        
+        if score >= 80 and risco in ["BAIXO", "MÉDIO-BAIXO"]:
+            veredito = "APROVADO"
+        elif score < 50:
+            veredito = "REPROVADO"
+        else:
+            veredito = "REVISÃO RECOMENDADA"
 
-with col4:
-    st.metric("Classificação de Risco", res['risco_classificacao'])
-    st.metric("Veredito", res['veredito'])
-
-st.divider()
-
-st.subheader("Relatório de Exportação")
-pdf_buffer = generate_pdf_buffer(res)
-
-st.download_button(
-    label="Baixar Relatório em PDF",
-    data=pdf_buffer,
-    file_name=f"relatorio_{nome_projeto.lower().replace(' ', '_')}.pdf",
-    mime="application/pdf"
-)
+        return {
+            "nome": self.data.get("nome", "Projeto"),
+            "tipo": self.data.get("tipo", "Futuro"),
+            "base": base,
+            "risco_angulo": angulo,
+            "risco_classificacao": risco,
+            "limite_viabilidade": limite_viabilidade,
+            "score": score,
+            "veredito": veredito,
+            "criterios": criterios
+        }
