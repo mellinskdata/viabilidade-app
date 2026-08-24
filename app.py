@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
 from utils import parse_brl, format_brl, format_pct
 from core import ProjectAnalyzer
@@ -158,22 +157,6 @@ if calcular:
                     st.error("Pro-Labore: ATENCAO! O projeto se torna inviavel ao retirar esse salario mensal.")
             else:
                 st.info("Pro-Labore: Nao foi solicitado calculo de remuneracao para os socios.")
-            
-            # Grafico de Sensibilidade
-            st.subheader("Sensibilidade e Ponto de Equilibrio")
-            x_vals = [(s['variacao'] * 100) for s in res['sensibilidade']]
-            y_vals = [(s['tir_m'] * 100 if s['tir_m'] else 0) for s in res['sensibilidade']]
-            
-            fig, ax = plt.subplots(figsize=(7, 3))
-            ax.plot(x_vals, y_vals, marker='o', color='#2980b9')
-            tma_p = res['base']['tma_m'] * 100
-            ax.axhline(y=tma_p, color='r', linestyle='--', label=f"TMA ({tma_p:.2f}% ao mes)")
-            ax.set_title("Efeito da variacao das Vendas na TIR Mensal")
-            ax.set_xlabel("Variacao nas Vendas (%)")
-            ax.set_ylabel("Rentabilidade ao mes (%)")
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-            st.pyplot(fig)
 
             # Botao de Download PDF
             st.markdown("---")
