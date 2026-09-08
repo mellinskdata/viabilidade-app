@@ -51,7 +51,7 @@ res = analyzer.analyze()
 st.subheader("Indicadores Financeiros Principais")
 base = res['base']
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.metric("VPL", f"R$ {base['vpl']:,.2f}")
@@ -64,20 +64,13 @@ with col2:
     st.metric("Payback Descontado", f"{base['payback_descontado']:.1f} meses" if base['payback_descontado'] is not None else "Não atinge")
 
 with col3:
-    st.metric("Score do Projeto", f"{res['score']}/100")
+    st.metric("Queda Limite (Vendas)", f"{res['limite_viabilidade']*100:.2f}%" if res['limite_viabilidade'] is not None else "-")
+    st.metric("Ângulo de Risco", f"{res['risco_angulo']:.2f}°" if res['risco_angulo'] is not None else "-")
+
+with col4:
+    st.metric("Classificação de Risco", res['risco_classificacao'])
     st.metric("Veredito", res['veredito'])
-
-st.divider()
-
-st.subheader("Análise de Sensibilidade da TIR (Variação de -50% a +50%)")
-sens_data = []
-for item in res['sensibilidade']:
-    sens_data.append({
-        "Variação (%)": f"{item['percentual']:.1f}%",
-        "TIR Mensal": f"{item['tir_m']*100:.2f}%" if item['tir_m'] is not None else "-",
-        "VPL (R$)": f"R$ {item['vpl']:,.2f}"
-    })
-st.table(sens_data)
+    st.metric("Score do Projeto", f"{res['score']}/100")
 
 st.divider()
 
