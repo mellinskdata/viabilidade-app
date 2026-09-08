@@ -37,6 +37,7 @@ class FinancialEngine:
         for t, cf in enumerate(cash_flows):
             prev_accumulated = accumulated
             accumulated += cf
+            
             if accumulated >= 0 and t > 0:
                 if cf == 0:
                     return float(t)
@@ -51,6 +52,7 @@ class FinancialEngine:
             discounted_cf = cf / ((1 + rate) ** t)
             prev_accumulated = accumulated
             accumulated += discounted_cf
+            
             if accumulated >= 0 and t > 0:
                 if discounted_cf == 0:
                     return float(t)
@@ -91,22 +93,30 @@ class ProjectAnalyzer:
         
         vpl = FinancialEngine.calc_npv(tma_m, cfs)
         tir_m = FinancialEngine.calc_irr(cfs)
-        tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None
         tirm_m = FinancialEngine.calc_mirr(cfs, tma_m, tma_m)
         payback_simples = FinancialEngine.calc_simple_payback(cfs)
         payback_desc = FinancialEngine.calc_discounted_payback(tma_m, cfs)
         
         return {
             "cfs": cfs, "tma_m": tma_m, "tma_a": tma_a,
-            "vpl": vpl, "tir_m": tir_m, "tir_a": tir_a,
+            "vpl": vpl, "tir_m": tir_m,
             "tirm_m": tirm_m,
             "payback_simples": payback_simples, 
             "payback_descontado": payback_desc
         }
 
     def analyze(self):
+        # Agora o cenario base computa o pro-labore perfeitamente
         base = self._analyze_scenario(1.0)
         
+        # 1. Sensibilidade
+        sensibilidade = []
+        fatores = [1.3, 1.2, 1.1, 1.0, 0.9, 0.8, 0.7, 0.6]
+        for f in fatores:
+            res = self._analyze_scenario(f)
+            sensibilidade.append({"variacao": f - 1.0, "tir_m": res["tir_m"], "vpl": res["vpl"]})
+            
+        # 2. Limite de Viabilidade (Busca Binaria - Interseccao Exata onde VPL zera)
         limite_viabilidade = None
         f_limit = 1.0
         
@@ -124,6 +134,7 @@ class ProjectAnalyzer:
             limite_viabilidade = 0.0
             f_limit = 1.0
 
+        # 3. Risco Angular (Metodologia Prof. Carlos Roberto Ferreira)
         if base["tir_m"] is not None and limite_viabilidade is not None and limite_viabilidade > 0:
             delta_y = (base["tir_m"] * 100.0) - (base["tma_m"] * 100.0)
             delta_x = limite_viabilidade * 100.0
@@ -142,6 +153,14 @@ class ProjectAnalyzer:
         elif angulo < 60: risco = "ALTO"
         else: risco = "MUITO ALTO"
 
+        # 4. Pro-Labore Analysis
+        pl_val = self.data.get("pro_labore", 0.0)
+        pl_recomendado = False
+        if pl_val > 0:
+            if base["vpl"] > 0 and (base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]):
+                pl_recomendado = True
+
+        # 5. Score e Veredito
         score = 0
         criterios = []
         
@@ -159,10 +178,10 @@ class ProjectAnalyzer:
             
         if base["payback_descontado"] is not None:
             score += 20
-            criterios.append(("[APROVADO]", "Payback dentro do período"))
+            criterios.append(("[APROVADO]", "Payback dentro do período analisado"))
         else:
-            criterios.append(("[REPROVADO]", "Investimento não recuperado"))
-
+            criterios.append(("[REPROVADO]", "Investimento não recuperado no período"))
+            
         risco_pontos = {"BAIXO": 20, "MÉDIO": 10, "ALTO": 0, "MUITO ALTO": -10, "INDEFINIDO": 0}
         score += risco_pontos.get(risco, 0)
         score = max(0, min(100, score))
@@ -174,11 +193,10 @@ class ProjectAnalyzer:
         return {
             "nome": self.data.get("nome", "Projeto"),
             "tipo": self.data.get("tipo", "Futuro"),
-            "base": base,
-            "risco_angulo": angulo, 
-            "risco_classificacao": risco,
+            "pl_solicitado": pl_val > 0,
+            "base": base, "sensibilidade": sensibilidade,
+            "risco_angulo": angulo, "risco_classificacao": risco,
             "limite_viabilidade": limite_viabilidade,
-            "score": score,
-            "veredito": veredito,
-            "criterios": criterios
+            "pl_recomendado": pl_recomendado,
+            "score": score, "veredito": veredito, "criterios": criterios
         }
