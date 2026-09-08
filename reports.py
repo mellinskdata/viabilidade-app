@@ -1,62 +1,65 @@
-from io import BytesIO
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
+import io
+from utils import format_brl, format_pct
 
-def format_pct(val):
-    if val is None:
-        return "-"
-    return f"{val * 100:.2f}%"
-
-def generate_pdf_buffer(res: dict) -> BytesIO:
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
-    story = []
-    
+def generate_pdf_buffer(results):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor("#1E3A8A"))
-    h2_style = ParagraphStyle('H2Style', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor("#1E3A8A"))
-    normal_style = styles['Normal']
-
-    story.append(Paragraph(f"Relatório de Análise de Viabilidade: {res.get('nome', 'Projeto')}", title_style))
-    story.append(Spacer(1, 12))
-
-    base = res['base']
-    dados_tabela = [
-        ["Indicador", "Valor"],
-        ["VPL", f"R$ {base['vpl']:,.2f}"],
+    title_style = ParagraphStyle(name='TitleStyle', parent=styles['Heading1'], alignment=1, spaceAfter=20)
+    h2_style = ParagraphStyle(name='H2', parent=styles['Heading2'], spaceBefore=15, spaceAfter=10)
+    normal = styles['Normal']
+    
+    elements = []
+    
+    elements.append(Paragraph("Relatório de Viabilidade Econômica", title_style))
+    elements.append(Paragraph(f"<b>Projeto:</b> {results['nome']}", normal))
+    elements.append(Paragraph(f"<b>Tipo:</b> {results['tipo']}", normal))
+    elements.append(Spacer(1, 15))
+    
+    elements.append(Paragraph("1. VEREDITO FINAL", h2_style))
+    elements.append(Paragraph(f"<b>Resultado:</b> {results['veredito']} (Score Geral: {results['score']}/100)", normal))
+    for c in results['criterios']:
+        elements.append(Paragraph(f"{c[0]} {c[1]}", normal))
+    
+    elements.append(Paragraph("2. INDICADORES FINANCEIROS", h2_style))
+    base = results['base']
+    
+    data_ind = [
+        ["Indicador", "Valor Calculado"],
+        ["VPL (Valor Presente Líquido)", format_brl(base['vpl'])],
         ["TIR Mensal", format_pct(base['tir_m'])],
-        ["TIR Anual", format_pct(base['tir_a'])],
         ["TIRM Mensal", format_pct(base['tirm_m'])],
-        ["Payback Simples", f"{base['payback_simples']:.1f} meses" if base['payback_simples'] is not None else "Não atinge"],
-        ["Payback Descontado", f"{base['payback_descontado']:.1f} meses" if base['payback_descontado'] is not None else "Não atinge"],
-        ["Queda Limite Suportada", format_pct(res['limite_viabilidade'])],
-        ["Ângulo de Sensibilidade", f"{res['risco_angulo']:.2f}°" if res['risco_angulo'] is not None else "-"],
-        ["Risco", res['risco_classificacao']],
-        ["Score", f"{res['score']}/100"],
-        ["Veredito", res['veredito']]
+        ["Payback Simples", f"{base['payback_simples']:.1f} meses" if base['payback_simples'] else "Não recupera"],
+        ["Payback Descontado", f"{base['payback_descontado']:.1f} meses" if base['payback_descontado'] else "Não recupera"]
     ]
-
-    t = Table(dados_tabela, colWidths=[200, 250])
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (1, 0), colors.HexColor("#1E3A8A")),
-        ('TEXTCOLOR', (0, 0), (1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#F3F4F6")),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#D1D5DB")),
+    t_ind = Table(data_ind, colWidths=[200, 200])
+    t_ind.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2c3e50")),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0,0), (-1,0), 12),
+        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#ecf0f1")),
+        ('GRID', (0,0), (-1,-1), 1, colors.black)
     ]))
+    elements.append(t_ind)
     
-    story.append(t)
-    story.append(Spacer(1, 16))
+    elements.append(Paragraph("3. ANÁLISE DE RISCO E SENSIBILIDADE", h2_style))
     
-    story.append(Paragraph("Critérios de Avaliação:", h2_style))
-    story.append(Spacer(1, 6))
-    for c in res.get('criterios', []):
-        story.append(Paragraph(f"• {c[0]} {c[1]}", normal_style))
-
-    doc.build(story)
+    if results['risco_angulo'] is not None:
+        texto_risco = f"<b>Classificação de Risco:</b> {results['risco_classificacao']} (Ângulo de Sensibilidade: {results['risco_angulo']:.1f} graus)"
+    else:
+        texto_risco = "<b>Classificação de Risco:</b> Indefinido"
+        
+    elements.append(Paragraph(texto_risco, normal))
+    
+    lim = format_pct(results['limite_viabilidade']) if results['limite_viabilidade'] is not None else "N/A"
+    elements.append(Paragraph(f"<b>Ponto de Inviabilidade:</b> O negócio entra no prejuízo (VPL negativo) caso as receitas caiam {lim}.", normal))
+    
+    doc.build(elements)
     buffer.seek(0)
     return buffer
