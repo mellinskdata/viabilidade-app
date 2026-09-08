@@ -14,7 +14,7 @@ class FinancialEngine:
     @staticmethod
     def calc_irr(cash_flows: list):
         try:
-            irr = npf.irr(cash_flows)
+            irr = npf.irr(cash_flows) #
             if irr is None or np.isnan(irr):
                 return None
             return float(irr)
@@ -37,7 +37,6 @@ class FinancialEngine:
         for t, cf in enumerate(cash_flows):
             prev_accumulated = accumulated
             accumulated += cf
-            
             if accumulated >= 0 and t > 0:
                 if cf == 0:
                     return float(t)
@@ -52,7 +51,6 @@ class FinancialEngine:
             discounted_cf = cf / ((1 + rate) ** t)
             prev_accumulated = accumulated
             accumulated += discounted_cf
-            
             if accumulated >= 0 and t > 0:
                 if discounted_cf == 0:
                     return float(t)
@@ -92,98 +90,57 @@ class ProjectAnalyzer:
         tma_m = FinancialEngine.calc_tma_mensal(tma_a)
         
         vpl = FinancialEngine.calc_npv(tma_m, cfs)
-        tir_m = FinancialEngine.calc_irr(cfs)
+        tir_m = FinancialEngine.calc_irr(cfs) #
+        tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None
         tirm_m = FinancialEngine.calc_mirr(cfs, tma_m, tma_m)
         payback_simples = FinancialEngine.calc_simple_payback(cfs)
         payback_desc = FinancialEngine.calc_discounted_payback(tma_m, cfs)
         
         return {
             "cfs": cfs, "tma_m": tma_m, "tma_a": tma_a,
-            "vpl": vpl, "tir_m": tir_m,
+            "vpl": vpl, "tir_m": tir_m, "tir_a": tir_a,
             "tirm_m": tirm_m,
             "payback_simples": payback_simples, 
             "payback_descontado": payback_desc
         }
 
     def analyze(self):
-        # Agora o cenario base computa o pro-labore perfeitamente
         base = self._analyze_scenario(1.0)
         
-        # 1. Sensibilidade
+        # Análise de sensibilidade baseada no método do vídeo (linspace de -50% a +50%)
         sensibilidade = []
-        fatores = [1.3, 1.2, 1.1, 1.0, 0.9, 0.8, 0.7, 0.6]
-        for f in fatores:
-            res = self._analyze_scenario(f)
-            sensibilidade.append({"variacao": f - 1.0, "tir_m": res["tir_m"], "vpl": res["vpl"]})
-            
-        # 2. Limite de Viabilidade (Busca Binaria - Interseccao Exata onde VPL zera)
-        limite_viabilidade = None
-        f_limit = 1.0
-        
-        if base["vpl"] > 0:
-            low, high = 0.0, 1.0
-            for _ in range(50):
-                mid = (low + high) / 2.0
-                if self._analyze_scenario(mid)["vpl"] > 0:
-                    high = mid
-                else:
-                    low = mid
-            f_limit = (low + high) / 2.0
-            limite_viabilidade = 1.0 - f_limit
-        elif base["vpl"] < 0:
-            limite_viabilidade = 0.0
-            f_limit = 1.0
+        variacoes = np.linspace(-0.5, 0.5, 20) #
+        for var in variacoes:
+            fator = 1.0 + var
+            res = self._analyze_scenario(fator)
+            sensibilidade.append({
+                "variacao": float(var),
+                "percentual": float(var * 100.0),
+                "tir_m": res["tir_m"],
+                "vpl": res["vpl"]
+            })
 
-        # 3. Risco Angular (Metodologia Prof. Carlos Roberto Ferreira)
-        if base["tir_m"] is not None and limite_viabilidade is not None and limite_viabilidade > 0:
-            delta_y = (base["tir_m"] * 100.0) - (base["tma_m"] * 100.0)
-            delta_x = limite_viabilidade * 100.0
-            
-            if delta_x > 0:
-                m = delta_y / delta_x
-                angulo = math.degrees(math.atan(m))
-            else:
-                angulo = 90.0
-        else:
-            angulo = None
-
-        if angulo is None: risco = "INDEFINIDO"
-        elif angulo < 30: risco = "BAIXO"
-        elif angulo < 45: risco = "MÉDIO"
-        elif angulo < 60: risco = "ALTO"
-        else: risco = "MUITO ALTO"
-
-        # 4. Pro-Labore Analysis
-        pl_val = self.data.get("pro_labore", 0.0)
-        pl_recomendado = False
-        if pl_val > 0:
-            if base["vpl"] > 0 and (base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]):
-                pl_recomendado = True
-
-        # 5. Score e Veredito
         score = 0
         criterios = []
         
         if base["vpl"] > 0:
-            score += 30
+            score += 40
             criterios.append(("[APROVADO]", "VPL positivo"))
         else:
             criterios.append(("[REPROVADO]", "VPL negativo"))
             
         if base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]:
-            score += 30
+            score += 40
             criterios.append(("[APROVADO]", "TIR superior ou igual à TMA"))
         else:
             criterios.append(("[REPROVADO]", "TIR inferior à TMA ou inexistente"))
             
         if base["payback_descontado"] is not None:
             score += 20
-            criterios.append(("[APROVADO]", "Payback dentro do período analisado"))
+            criterios.append(("[APROVADO]", "Payback dentro do período"))
         else:
-            criterios.append(("[REPROVADO]", "Investimento não recuperado no período"))
+            criterios.append(("[REPROVADO]", "Investimento não recuperado"))
             
-        risco_pontos = {"BAIXO": 20, "MÉDIO": 10, "ALTO": 0, "MUITO ALTO": -10, "INDEFINIDO": 0}
-        score += risco_pontos.get(risco, 0)
         score = max(0, min(100, score))
         
         if score >= 80: veredito = "APROVADO"
@@ -193,10 +150,9 @@ class ProjectAnalyzer:
         return {
             "nome": self.data.get("nome", "Projeto"),
             "tipo": self.data.get("tipo", "Futuro"),
-            "pl_solicitado": pl_val > 0,
-            "base": base, "sensibilidade": sensibilidade,
-            "risco_angulo": angulo, "risco_classificacao": risco,
-            "limite_viabilidade": limite_viabilidade,
-            "pl_recomendado": pl_recomendado,
-            "score": score, "veredito": veredito, "criterios": criterios
+            "base": base,
+            "sensibilidade": sensibilidade,
+            "score": score,
+            "veredito": veredito,
+            "criterios": criterios
         }
