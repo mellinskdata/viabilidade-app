@@ -14,7 +14,7 @@ class FinancialEngine:
     @staticmethod
     def calc_irr(cash_flows: list):
         try:
-            irr = npf.irr(cash_flows) #
+            irr = npf.irr(cash_flows)
             if irr is None or np.isnan(irr):
                 return None
             return float(irr)
@@ -90,7 +90,7 @@ class ProjectAnalyzer:
         tma_m = FinancialEngine.calc_tma_mensal(tma_a)
         
         vpl = FinancialEngine.calc_npv(tma_m, cfs)
-        tir_m = FinancialEngine.calc_irr(cfs) #
+        tir_m = FinancialEngine.calc_irr(cfs)
         tir_a = ((1 + tir_m)**12 - 1) if tir_m is not None else None
         tirm_m = FinancialEngine.calc_mirr(cfs, tma_m, tma_m)
         payback_simples = FinancialEngine.calc_simple_payback(cfs)
@@ -107,30 +107,52 @@ class ProjectAnalyzer:
     def analyze(self):
         base = self._analyze_scenario(1.0)
         
-        # Análise de sensibilidade baseada no método do vídeo (linspace de -50% a +50%)
-        sensibilidade = []
-        variacoes = np.linspace(-0.5, 0.5, 20) #
-        for var in variacoes:
-            fator = 1.0 + var
-            res = self._analyze_scenario(fator)
-            sensibilidade.append({
-                "variacao": float(var),
-                "percentual": float(var * 100.0),
-                "tir_m": res["tir_m"],
-                "vpl": res["vpl"]
-            })
+        limite_viabilidade = None
+        f_limit = 1.0
+        
+        if base["vpl"] > 0:
+            low, high = 0.0, 1.0
+            for _ in range(50):
+                mid = (low + high) / 2.0
+                if self._analyze_scenario(mid)["vpl"] > 0:
+                    high = mid
+                else:
+                    low = mid
+            f_limit = (low + high) / 2.0
+            limite_viabilidade = 1.0 - f_limit
+        elif base["vpl"] < 0:
+            limite_viabilidade = 0.0
+            f_limit = 1.0
+
+        if base["tir_m"] is not None and limite_viabilidade is not None and limite_viabilidade > 0:
+            delta_y = (base["tir_m"] * 100.0) - (base["tma_m"] * 100.0)
+            delta_x = limite_viabilidade * 100.0
+            
+            if delta_x > 0:
+                m = delta_y / delta_x
+                angulo = math.degrees(math.atan(m))
+            else:
+                angulo = 90.0
+        else:
+            angulo = None
+
+        if angulo is None: risco = "INDEFINIDO"
+        elif angulo < 30: risco = "BAIXO"
+        elif angulo < 45: risco = "MÉDIO"
+        elif angulo < 60: risco = "ALTO"
+        else: risco = "MUITO ALTO"
 
         score = 0
         criterios = []
         
         if base["vpl"] > 0:
-            score += 40
+            score += 30
             criterios.append(("[APROVADO]", "VPL positivo"))
         else:
             criterios.append(("[REPROVADO]", "VPL negativo"))
             
         if base["tir_m"] is not None and base["tir_m"] >= base["tma_m"]:
-            score += 40
+            score += 30
             criterios.append(("[APROVADO]", "TIR superior ou igual à TMA"))
         else:
             criterios.append(("[REPROVADO]", "TIR inferior à TMA ou inexistente"))
@@ -140,7 +162,9 @@ class ProjectAnalyzer:
             criterios.append(("[APROVADO]", "Payback dentro do período"))
         else:
             criterios.append(("[REPROVADO]", "Investimento não recuperado"))
-            
+
+        risco_pontos = {"BAIXO": 20, "MÉDIO": 10, "ALTO": 0, "MUITO ALTO": -10, "INDEFINIDO": 0}
+        score += risco_pontos.get(risco, 0)
         score = max(0, min(100, score))
         
         if score >= 80: veredito = "APROVADO"
@@ -151,7 +175,9 @@ class ProjectAnalyzer:
             "nome": self.data.get("nome", "Projeto"),
             "tipo": self.data.get("tipo", "Futuro"),
             "base": base,
-            "sensibilidade": sensibilidade,
+            "risco_angulo": angulo, 
+            "risco_classificacao": risco,
+            "limite_viabilidade": limite_viabilidade,
             "score": score,
             "veredito": veredito,
             "criterios": criterios
