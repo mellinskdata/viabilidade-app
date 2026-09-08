@@ -1,167 +1,258 @@
-import streamlit as st
+"""
+app.py
+-------
+Interface Streamlit do motor de engenharia economica.
+
+Coleta as premissas do projeto (nome, tipo presente/futuro, periodo,
+investimento, receita/custo medios ou lancamentos mensais customizados,
+pro-labore e TMA), aciona o motor de calculo em core.py e apresenta os
+indicadores essenciais (TIR, TIRM, Payback, risco e veredito), alem de
+permitir a exportacao do relatorio executivo em PDF via reports.py.
+"""
+
+from __future__ import annotations
+
 import pandas as pd
-from utils import parse_brl, format_brl, format_pct
-from core import ProjectAnalyzer
-from reports import generate_pdf_buffer
+import streamlit as st
 
-# Configuração da Página
-st.set_page_config(page_title="Viabilidade Econômica", layout="centered")
+import core
+import reports
+from utils import (
+    formatar_meses,
+    formatar_percentual,
+    rotulo_risco_para_cor,
+    validar_entradas_basicas,
+)
 
-# Cores e Estilo
-st.markdown("""
-    <style>
-    .big-font {font-size:20px !important;}
-    .aprovado {color: #2ecc71; font-weight: bold; font-size: 28px;}
-    .reprovado {color: #e74c3c; font-weight: bold; font-size: 28px;}
-    .revisao {color: #f1c40f; font-weight: bold; font-size: 28px;}
-    </style>
-""", unsafe_allow_html=True)
 
-# Inicializar Variáveis de Exemplo
-if "ex_nome" not in st.session_state:
-    st.session_state.update({
-        "ex_nome": "", "ex_tma": "", "ex_pro": "", "ex_inv": "", 
-        "ex_rec": "", "ex_cus": "", "ex_meses": "12"
-    })
+st.set_page_config(
+    page_title="Motor de Engenharia Economica",
+    layout="wide",
+)
 
-def carregar_exemplo():
-    st.session_state.update({
-        "ex_nome": "Projeto Padrão (Exemplo)", "ex_tma": "15,00", "ex_pro": "2.000,00", 
-        "ex_inv": "29.400,00", "ex_rec": "10.000,00", "ex_cus": "4.000,00", "ex_meses": "12"
-    })
+st.title("Motor de Engenharia Economica")
+st.caption("Analise de viabilidade financeira de projetos: TIR, TIRM, Payback e Risco.")
 
-# Menu Lateral (Ajuda)
-with st.sidebar:
-    st.title("Ajuda e Conceitos")
-    st.button("Carregar Dados de Exemplo", on_click=carregar_exemplo, use_container_width=True)
-    
-    with st.expander("O que significam as siglas?"):
-        st.write("**VPL:** Mostra se o negócio vai gerar lucro real acima da inflação/taxa exigida.")
-        st.write("**TIR:** É a rentabilidade do seu negócio.")
-        st.write("**TIRM:** Taxa Interna de Retorno Modificada (considera taxa de reinvestimento).")
-        st.write("**TMA:** É o mínimo que você aceita ganhar.")
-        st.write("**Payback:** Em quantos meses o dinheiro investido retorna.")
-        st.write("**Pró-Labore:** Seu salário como dono.")
+if "resultado" not in st.session_state:
+    st.session_state["resultado"] = None
 
-# Corpo do Site
-st.title("Análise de Viabilidade Econômica")
-st.write("Descubra se o seu negócio possui viabilidade financeira.")
 
-# Passo 1
-st.header("1. Dados Básicos")
-col1, col2 = st.columns(2)
-nome = col1.text_input("Nome do Negócio", value=st.session_state.ex_nome)
-tipo = col2.radio("Situação", ["Negócio Futuro", "Negócio Existente (Já funciona)"])
+# ---------------------------------------------------------------------------
+# Formulario de entrada
+# ---------------------------------------------------------------------------
 
-col3, col4 = st.columns(2)
-tma = col3.text_input("Taxa Mínima Aceitável ao ano (Ex: 15,00 para 15%)", value=st.session_state.ex_tma)
-pro_labore = col4.text_input("Pró-Labore Desejado por mês (R$)", value=st.session_state.ex_pro)
+with st.form("formulario_projeto"):
+    st.subheader("Dados do Projeto")
 
-# Passo 2
-st.header("2. Receitas e Custos")
-modo = st.radio("Como prefere preencher?", ["Usar Média Mensal (Mais Fácil)", "Preencher Mês a Mês (Detalhado)"])
-inv = st.text_input("Qual o Investimento Inicial? (R$)", value=st.session_state.ex_inv)
+    col_nome, col_tipo, col_tma = st.columns(3)
+    with col_nome:
+        nome_projeto = st.text_input("Nome do projeto", value="Meu Projeto")
+    with col_tipo:
+        tipo_projeto = st.selectbox("Projeto presente ou futuro", ["Futuro", "Presente"])
+    with col_tma:
+        tma_anual_pct = st.number_input(
+            "TMA anual (%)",
+            min_value=0.0,
+            max_value=500.0,
+            value=15.0,
+            step=0.5,
+            help="Taxa Minima de Atratividade anual, usada para descontar o fluxo de caixa.",
+        )
 
-dados_mensais = []
-periodo_meses = 0
-rec_media = 0
-cus_medio = 0
+    if tipo_projeto == "Futuro":
+        st.caption(
+            "Projeto futuro: o investimento inicial ocorre no mes 0, antes do "
+            "inicio das operacoes."
+        )
+    else:
+        st.caption(
+            "Projeto presente: o investimento inicial representa aporte ou "
+            "expansao a partir de agora, para um negocio ja em operacao."
+        )
 
-if "Média" in modo:
-    col5, col6, col7 = st.columns(3)
-    rec_media_txt = col5.text_input("Receita Média por mês (R$)", value=st.session_state.ex_rec)
-    cus_medio_txt = col6.text_input("Custo Médio por mês (R$)", value=st.session_state.ex_cus)
-    meses_txt = col7.text_input("Analisar por quantos meses?", value=st.session_state.ex_meses)
-    
-    rec_media = parse_brl(rec_media_txt)
-    cus_medio = parse_brl(cus_medio_txt)
-    try: periodo_meses = int(meses_txt)
-    except: periodo_meses = 0
+    col_periodo, col_investimento, col_prolabore = st.columns(3)
+    with col_periodo:
+        periodo_meses = st.number_input(
+            "Periodo de analise (meses)", min_value=1, max_value=600, value=36, step=1
+        )
+    with col_investimento:
+        investimento_inicial = st.number_input(
+            "Investimento inicial (R$)", min_value=0.0, value=50000.0, step=1000.0
+        )
+    with col_prolabore:
+        pro_labore = st.number_input(
+            "Pro-labore desejado / mes (R$)",
+            min_value=0.0,
+            value=3000.0,
+            step=100.0,
+            help="Retirada mensal desejada pelo empreendedor, tratada como custo do projeto.",
+        )
 
-else:
-    st.info("Altere os valores diretamente na tabela abaixo:")
-    df_padrao = pd.DataFrame([{"Mês": i+1, "Receita (R$)": 0.0, "Custo (R$)": 0.0} for i in range(12)])
-    df_editado = st.data_editor(df_padrao, num_rows="dynamic", use_container_width=True)
-    for index, row in df_editado.iterrows():
-        dados_mensais.append({"receita": float(row["Receita (R$)"]), "custo": float(row["Custo (R$)"])})
-    periodo_meses = len(dados_mensais)
+    st.markdown("---")
+    st.subheader("Fluxo de Caixa")
 
-# Passo 3: Botão Principal
-st.markdown("---")
-calcular = st.button("CLIQUE AQUI PARA CALCULAR VIABILIDADE", use_container_width=True, type="primary")
+    modo_selecionado = st.radio(
+        "Como deseja informar o fluxo de caixa?",
+        ["Media mensal (receita e custo fixos)", "Lancamentos mensais customizados"],
+        horizontal=True,
+    )
+    modo_fluxo = "media" if modo_selecionado.startswith("Media") else "customizado"
+
+    receita_media = 0.0
+    custo_medio = 0.0
+    lancamentos_mensais = None
+
+    if modo_fluxo == "media":
+        col_receita, col_custo = st.columns(2)
+        with col_receita:
+            receita_media = st.number_input(
+                "Receita media / mes (R$)", min_value=0.0, value=15000.0, step=500.0
+            )
+        with col_custo:
+            custo_medio = st.number_input(
+                "Custo medio / mes (R$)", min_value=0.0, value=8000.0, step=500.0
+            )
+    else:
+        st.caption("Informe a receita e o custo previstos para cada mes do periodo de analise.")
+        tabela_padrao = pd.DataFrame(
+            {
+                "mes": list(range(1, int(periodo_meses) + 1)),
+                "receita": [15000.0] * int(periodo_meses),
+                "custo": [8000.0] * int(periodo_meses),
+            }
+        )
+        tabela_editada = st.data_editor(
+            tabela_padrao,
+            num_rows="fixed",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "mes": st.column_config.NumberColumn("Mes", disabled=True),
+                "receita": st.column_config.NumberColumn("Receita (R$)", min_value=0.0),
+                "custo": st.column_config.NumberColumn("Custo (R$)", min_value=0.0),
+            },
+            key="tabela_lancamentos",
+        )
+        lancamentos_mensais = tabela_editada.to_dict("records")
+
+    calcular = st.form_submit_button("Calcular Viabilidade", use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
+# Processamento
+# ---------------------------------------------------------------------------
 
 if calcular:
-    investimento_float = parse_brl(inv)
-    
-    if investimento_float <= 0:
-        st.error("Por favor, preencha o Investimento Inicial com um valor maior que zero.")
-    elif periodo_meses <= 0:
-        st.error("O período de análise deve ter pelo menos 1 mês.")
+    erros = validar_entradas_basicas(
+        periodo_meses=int(periodo_meses),
+        investimento_inicial=investimento_inicial,
+        tma_anual=tma_anual_pct / 100,
+    )
+    if erros:
+        for erro in erros:
+            st.error(erro)
     else:
-        data = {
-            "nome": nome, "tipo": tipo, "tma_anual": parse_brl(tma) / 100.0,
-            "pro_labore": parse_brl(pro_labore), "investimento": investimento_float,
-            "mode": "average" if "Média" in modo else "monthly",
-            "receita_media": rec_media, "custo_medio": cus_medio,
-            "periodo_meses": periodo_meses, "dados_mensais": dados_mensais
-        }
-        
-        with st.spinner("Analisando finanças..."):
-            analyzer = ProjectAnalyzer(data)
-            res = analyzer.analyze()
-            
-            # --- EXIBIÇÃO DOS RESULTADOS ---
-            st.markdown("---")
-            st.header("Resultado da Análise")
-            
-            # Veredito Visual
-            if res['veredito'] == "APROVADO":
-                st.markdown(f"<p class='aprovado'>APROVADO</p>", unsafe_allow_html=True)
-                st.success("Financeiramente, este é um bom negócio para se investir.")
-            elif res['veredito'] == "REPROVADO":
-                st.markdown(f"<p class='reprovado'>REPROVADO</p>", unsafe_allow_html=True)
-                st.error("Cuidado! Este projeto vai dar prejuízo ou não atinge a rentabilidade mínima exigida.")
-            else:
-                st.markdown(f"<p class='revisao'>REVISÃO RECOMENDADA</p>", unsafe_allow_html=True)
-                st.warning("O negócio se paga, mas apresenta riscos e rentabilidade limitados. Estude com cautela.")
-
-            # Indicadores Principais - Bloco de Métricas
-            st.subheader("Indicadores Financeiros")
-            
-            c1, c2, c3 = st.columns(3)
-            c1.metric("VPL (Lucro Real)", format_brl(res['base']['vpl']))
-            c2.metric("TIR Mensal", format_pct(res['base']['tir_m']))
-            c3.metric("TIRM Mensal", format_pct(res['base']['tirm_m']))
-            
-            c4, c5 = st.columns(2)
-            pb_simples = f"{res['base']['payback_simples']:.1f} meses" if res['base']['payback_simples'] else "Não recupera"
-            pb_desc = f"{res['base']['payback_descontado']:.1f} meses" if res['base']['payback_descontado'] else "Não recupera"
-            
-            c4.metric("Payback Simples", pb_simples)
-            c5.metric("Payback Descontado", pb_desc)
-
-            # Risco e Pró-Labore
-            st.subheader("Análise de Risco e Pró-Labore")
-            limite = format_pct(res['limite_viabilidade']) if res['limite_viabilidade'] else "Inviável"
-            angulo_str = f"{res['risco_angulo']:.1f} graus" if res['risco_angulo'] is not None else "Indefinido"
-            
-            st.info(f"Classificação de Risco: {res['risco_classificacao']}. O negócio entra no prejuízo se as receitas caírem {limite}.")
-            
-            if res['pl_solicitado']:
-                if res['pl_recomendado']:
-                    st.success("Pró-Labore: O negócio consegue pagar o salário desejado sem quebrar o caixa.")
-                else:
-                    st.error("Pró-Labore: ATENÇÃO! O projeto se torna inviável ao retirar esse salário mensal.")
-            else:
-                st.info("Pró-Labore: Não foi solicitado cálculo de remuneração para os sócios.")
-
-            # Botão de Download PDF
-            st.markdown("---")
-            pdf_buffer = generate_pdf_buffer(res)
-            st.download_button(
-                label="BAIXAR RELATÓRIO COMPLETO EM PDF",
-                data=pdf_buffer,
-                file_name=f"Relatorio_{nome.replace(' ', '_')}.pdf",
-                mime="application/pdf",
-                use_container_width=True
+        try:
+            resultado = core.executar_analise(
+                nome_projeto=nome_projeto or "Projeto sem nome",
+                tipo_projeto=tipo_projeto,
+                tma_anual=tma_anual_pct / 100,
+                periodo_meses=int(periodo_meses),
+                investimento_inicial=investimento_inicial,
+                modo_fluxo=modo_fluxo,
+                receita_media=receita_media,
+                custo_medio=custo_medio,
+                pro_labore=pro_labore,
+                lancamentos_mensais=lancamentos_mensais,
             )
+            st.session_state["resultado"] = resultado
+        except core.ErroCalculoFinanceiro as erro:
+            st.error(f"Erro no calculo financeiro: {erro}")
+        except ValueError as erro:
+            st.error(f"Entrada invalida: {erro}")
+
+
+# ---------------------------------------------------------------------------
+# Resultados
+# ---------------------------------------------------------------------------
+
+resultado = st.session_state.get("resultado")
+
+if resultado:
+    st.markdown("---")
+    st.subheader(f"Resultados - {resultado['nome_projeto']}")
+
+    col_tir, col_tirm, col_payback = st.columns(3)
+    with col_tir:
+        st.metric("TIR anual", formatar_percentual(resultado["tir_anual"]))
+        st.caption(f"TIR mensal: {formatar_percentual(resultado['tir_mensal'])}")
+    with col_tirm:
+        st.metric("TIRM anual", formatar_percentual(resultado["tirm_anual"]))
+        st.caption(f"TIRM mensal: {formatar_percentual(resultado['tirm_mensal'])}")
+    with col_payback:
+        st.metric("Payback simples", formatar_meses(resultado["payback_simples_meses"]))
+        st.caption(
+            f"Payback descontado: {formatar_meses(resultado['payback_descontado_meses'])}"
+        )
+
+    col_risco, col_veredito = st.columns([1, 2])
+    with col_risco:
+        risco = resultado["risco"]
+        cor = rotulo_risco_para_cor(risco)
+        st.markdown("**Analise de Risco**")
+        st.markdown(
+            f"<div style='padding:14px;border-radius:8px;background-color:{cor};"
+            f"color:white;text-align:center;font-size:1.1rem;font-weight:600;'>"
+            f"Risco {risco}</div>",
+            unsafe_allow_html=True,
+        )
+        inclinacao = resultado["sensibilidade"]["inclinacao_tir"]
+        st.caption(
+            f"Sensibilidade: {inclinacao:.2f} p.p. de TIR mensal por 1% de "
+            "variacao na receita projetada."
+        )
+
+    with col_veredito:
+        veredito = resultado["veredito"]
+        st.markdown("**Veredito**")
+        mensagem = f"**{veredito['titulo']}**\n\n{veredito['justificativa']}"
+        if veredito["severidade"] == "positivo":
+            st.success(mensagem)
+        elif veredito["severidade"] == "atencao":
+            st.warning(mensagem)
+        else:
+            st.error(mensagem)
+
+    with st.expander("Detalhes da analise de sensibilidade"):
+        sensibilidade = resultado["sensibilidade"]
+        st.caption(
+            "A variacao e aplicada apenas sobre a receita projetada (custo e "
+            "pro-labore permanecem fixos). O risco e classificado com base na "
+            "inclinacao da reta TIR mensal x variacao (coluna destacada abaixo)."
+        )
+        df_sensibilidade = pd.DataFrame(
+            {
+                "Variacao na receita (%)": sensibilidade["variacoes_percentuais"],
+                "TIR mensal resultante (%)": sensibilidade["tir_mensal_resultante_pct"],
+                "TIR anual resultante (%)": sensibilidade["tir_anual_resultante_pct"],
+                "VPL resultante (R$)": sensibilidade["vpl_resultante"],
+            }
+        )
+        st.dataframe(df_sensibilidade, use_container_width=True, hide_index=True)
+        st.line_chart(
+            df_sensibilidade.set_index("Variacao na receita (%)")["TIR mensal resultante (%)"]
+        )
+
+    st.markdown("---")
+    st.subheader("Exportar Relatorio")
+    buffer_pdf = reports.gerar_relatorio_pdf(resultado)
+    nome_arquivo = resultado["nome_projeto"].strip().replace(" ", "_") or "projeto"
+    st.download_button(
+        label="Baixar relatorio em PDF",
+        data=buffer_pdf,
+        file_name=f"relatorio_viabilidade_{nome_arquivo}.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+    )
+else:
+    st.info("Preencha os dados do projeto e clique em Calcular Viabilidade para ver os resultados.")
