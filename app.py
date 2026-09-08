@@ -145,7 +145,7 @@ if calcular:
             limite = format_pct(res['limite_viabilidade']) if res['limite_viabilidade'] else "Inviável"
             angulo_str = f"{res['risco_angulo']:.1f} graus" if res['risco_angulo'] is not None else "Indefinido"
             
-            st.info(f"Classificação de Risco: {res['risco_classificacao']} (Ângulo: {angulo_str}). O negócio entra no prejuízo se as receitas caírem {limite}.")
+            st.info(f"Classificação de Risco: {res['risco_classificacao']}. O negócio entra no prejuízo se as receitas caírem {limite}.")
             
             if res['pl_solicitado']:
                 if res['pl_recomendado']:
