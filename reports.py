@@ -31,6 +31,9 @@ def generate_pdf_buffer(res: dict) -> BytesIO:
         ["TIRM Mensal", format_pct(base['tirm_m'])],
         ["Payback Simples", f"{base['payback_simples']:.1f} meses" if base['payback_simples'] is not None else "Não atinge"],
         ["Payback Descontado", f"{base['payback_descontado']:.1f} meses" if base['payback_descontado'] is not None else "Não atinge"],
+        ["Queda Limite Suportada", format_pct(res['limite_viabilidade'])],
+        ["Ângulo de Sensibilidade", f"{res['risco_angulo']:.2f}°" if res['risco_angulo'] is not None else "-"],
+        ["Risco", res['risco_classificacao']],
         ["Score", f"{res['score']}/100"],
         ["Veredito", res['veredito']]
     ]
