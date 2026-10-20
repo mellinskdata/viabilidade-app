@@ -38,18 +38,25 @@ def abrir_ajuda(chave):
 """)
 
 
+@st.dialog("Ajuda sobre os indicadores")
+def exibir_dialogo_ajuda(chave):
+    """Abre um modal com o texto e, quando aplicável, o gráfico de ajuda."""
+    abrir_ajuda(chave)
+
+
 def rotulo_com_ajuda(rotulo, chave):
-    # Ajuda clicável ao lado da palavra-chave, sem barra lateral.
-    nome, botao, _ = st.columns([3.8, 0.65, 2.6], gap="small", vertical_alignment="center")
+    """Exibe um botão '?' legível até nas colunas estreitas dos indicadores."""
+    nome, botao = st.columns([3, 1.2], gap="small", vertical_alignment="center")
     nome.markdown(f"**{rotulo}**")
-    with botao.popover("?", help=f"O que significa {rotulo}?"):
-        abrir_ajuda(chave)
+    with botao:
+        if st.button("?", key=f"ajuda_{chave}", help=f"O que significa {rotulo}?", use_container_width=True):
+            exibir_dialogo_ajuda(chave)
 
 
 def carregar_exemplo():
     st.session_state["nome"] = "Projeto Padrão (Exemplo)"
     st.session_state["tma"] = "15,00"
-    st.session_state["investimento"] = "29.400,00"
+    st.session_state["investimento"] = "40.000,00"
     st.session_state["meses"] = 12
     st.session_state["historico_mensal"] = [{"receita": 10000.0, "custo": 4000.0} for _ in range(12)]
     st.session_state.pop("resultado", None)
@@ -147,7 +154,7 @@ if "resultado" in st.session_state:
     st.header("Resultado da Análise")
     if res["veredito"] == "APROVADO":
         st.markdown("<p class='aprovado'>APROVADO</p>", unsafe_allow_html=True)
-        st.success("Financeiramente, este é um bom negócio para se investir, segundo os critérios do aplicativo.")
+        st.success("Financeiramente, o investimento apresenta resultados favoráveis.")
     elif res["veredito"] == "REPROVADO":
         st.markdown("<p class='reprovado'>REPROVADO</p>", unsafe_allow_html=True)
         st.error("O projeto não atinge os critérios mínimos de retorno. Revise as estimativas.")
@@ -163,21 +170,22 @@ if "resultado" in st.session_state:
     with c2:
         rotulo_com_ajuda("TIR", "TIR")
         st.metric("TIR anual", format_pct(res["base"]["tir_a"]))
+        st.caption(f"**TIR mensal:** {format_pct(res['base']['tir_m'])}")
     with c3:
         rotulo_com_ajuda("TIRM", "TIRM")
         st.metric("TIRM anual", format_pct(res["base"]["tirm_a"]))
+        st.caption(f"**TIRM mensal:** {format_pct(res['base']['tirm_m'])}")
 
     rotulo_com_ajuda("Payback Descontado", "PAYBACK")
     pb = res["base"]["payback_descontado"]
-    st.metric("Retorno do investimento (descontado)", f"{pb:.1f} meses" if pb is not None else "Não recupera no período")
+    st.metric("Retorno do investimento (descontado)", f"{pb:.2f}".replace(".", ",") + " meses" if pb is not None else "Não recupera no período")
 
     st.subheader("Análise de Risco — Sensibilidade da TIR")
     rotulo_com_ajuda("Classificação de risco", "RISCO")
-    grau = res["risco_angulo"]
-    if grau is None:
+    if res["risco_classificacao"] == "INDEFINIDO":
         st.info("Risco indefinido para os dados informados.")
     else:
-        st.info(f"Classificação: **{res['risco_classificacao']}** (ângulo: {grau:.1f}°).")
+        st.info(f"Classificação: **{res['risco_classificacao']}**.")
     if res["limite_viabilidade"] is not None and res["base"]["vpl"] > 0:
         st.caption(f"Queda máxima estimada das receitas até o VPL atingir zero: {format_pct(res['limite_viabilidade'])}.")
 

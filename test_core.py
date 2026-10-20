@@ -54,3 +54,50 @@ def test_months_and_pdf_dynamic():
 def test_risk_bands_are_compatible_with_diagram():
     for angle, expected in [(30, "BAIXO"), (45, "MÉDIO BAIXO"), (60, "MÉDIO ALTO"), (61, "ALTO")]:
         assert ProjectAnalyzer.classify_risk(angle) == expected
+
+
+def test_exemplo_40000_calculos_revisados():
+    """Confere números do exemplo que o usuário carrega pelo botão."""
+    from pathlib import Path
+    app_source = Path(__file__).with_name("app.py").read_text(encoding="utf-8")
+    assert 'st.session_state["investimento"] = "40.000,00"' in app_source
+    assert 'st.session_state["investimento"] = "29.400,00"' not in app_source
+    assert 'st.button("?"' in app_source
+    assert "st.dialog" in app_source
+    assert 'format_pct(res[\'base\'][\'tir_m\'])' in app_source
+    assert 'format_pct(res[\'base\'][\'tirm_m\'])' in app_source
+    assert 'segundo os critérios do aplicativo' not in app_source
+    example = {
+        "nome": "Projeto Padrão (Exemplo)",
+        "investimento": 40000,
+        "tma_anual": .15,
+        "dados_mensais": [{"receita": 10000, "custo": 4000} for _ in range(12)],
+    }
+    result = ProjectAnalyzer(example).analyze()
+    assert result["base"]["vpl"] == pytest.approx(26804.46, abs=.01)
+    assert result["base"]["tir_m"] == pytest.approx(.1045, abs=.0001)
+    assert result["base"]["tir_a"] == pytest.approx(2.2953, abs=.0001)
+    assert result["base"]["tirm_m"] == pytest.approx(.0559, abs=.0001)
+    assert result["base"]["tirm_a"] == pytest.approx(.9206, abs=.0001)
+    assert result["base"]["payback_descontado"] == pytest.approx(6.982, abs=.001)
+    assert result["veredito"] == "APROVADO"
+
+
+def test_pdf_contem_ajuda_e_taxas_mensais_sem_angulo():
+    fitz = pytest.importorskip("fitz")
+    result = ProjectAnalyzer({
+        "nome": "Projeto Exemplo", "investimento": 40000, "tma_anual": .15,
+        "dados_mensais": [{"receita": 10000, "custo": 4000} for _ in range(12)],
+    }).analyze()
+    pdf = fitz.open(stream=generate_pdf_buffer(result).getvalue(), filetype="pdf")
+    text = "\n".join(page.get_text() for page in pdf)
+    for expected in (
+        "R$ 40.000,00", "R$ 26.804,46", "TIR mensal", "TIR anual",
+        "TIRM mensal", "TIRM anual", "10,45%", "229,53%", "5,59%",
+        "92,06%", "6,98 meses", "GUIA DOS INDICADORES", "?",
+    ):
+        assert expected in text, expected
+    assert "ângulo" not in text.lower()
+    assert "segundo os critérios do aplicativo" not in text.lower()
+    assert "pró-labore" not in text.lower()
+    assert sum(len(page.get_links()) for page in pdf) >= 8
